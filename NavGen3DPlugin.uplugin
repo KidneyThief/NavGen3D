@@ -17,7 +17,7 @@
 	"Modules": [
 		{
 			"Name": "NavGen3DPlugin",
-			"Type": "Editor",
+			"Type": "Runtime",
 			"LoadingPhase": "Default"
 		}
 	]
