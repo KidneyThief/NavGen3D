@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Modules/ModuleManager.h"
+#include "Framework/Docking/WorkspaceItem.h"
 
 /**
  * This is the module definition for the editor mode. You can implement custom functionality
@@ -21,4 +22,5 @@ private:
 	TSharedRef<SDockTab> SpawnNavGen3DTab(const FSpawnTabArgs& SpawnTabArgs);
 
 	static const FName NavGen3DTabName;
+	TSharedPtr<FWorkspaceItem> NavGen3DMenuGroup;
 };

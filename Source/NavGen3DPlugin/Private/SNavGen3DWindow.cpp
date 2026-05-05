@@ -10,33 +10,43 @@ void SNavGen3DWindow::Construct(const FArguments& InArgs)
 {
 	ChildSlot
 	[
-		SNew(SBox)
-		.Padding(8.0f)
+		SNew(SVerticalBox)
+
+		+ SVerticalBox::Slot()
+		.AutoHeight()
+		.Padding(8.0f, 8.0f, 8.0f, 4.0f)
 		[
 			SNew(SCheckBox)
-			.IsChecked(this, &SNavGen3DWindow::GetDrawNavMesh3DState)
-			.OnCheckStateChanged(this, &SNavGen3DWindow::OnDrawNavMesh3DChanged)
+			.IsChecked(this, &SNavGen3DWindow::GetDrawNavBounds3DState)
+			.OnCheckStateChanged(this, &SNavGen3DWindow::OnDrawNavBounds3DChanged)
 			[
-				SNew(STextBlock)
-				.Text(FText::FromString("Draw NavMesh 3D"))
+				SNew(SBox)
+				.Padding(4.0f, 0.0f, 0.0f, 0.0f)
+				[
+					SNew(STextBlock)
+					.Text(FText::FromString("Draw NavBounds3D"))
+				]
 			]
 		]
+
+		+ SVerticalBox::Slot()
+		.FillHeight(1.0f)
 	];
 }
 
-ECheckBoxState SNavGen3DWindow::GetDrawNavMesh3DState() const
+ECheckBoxState SNavGen3DWindow::GetDrawNavBounds3DState() const
 {
 	if (const UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
 	{
-		return Subsystem->DrawNavMesh3D ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+		return Subsystem->DrawNavBounds3D ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
 	}
 	return ECheckBoxState::Unchecked;
 }
 
-void SNavGen3DWindow::OnDrawNavMesh3DChanged(ECheckBoxState NewState)
+void SNavGen3DWindow::OnDrawNavBounds3DChanged(ECheckBoxState NewState)
 {
 	if (UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
 	{
-		Subsystem->DrawNavMesh3D = (NewState == ECheckBoxState::Checked);
+		Subsystem->DrawNavBounds3D = (NewState == ECheckBoxState::Checked);
 	}
 }

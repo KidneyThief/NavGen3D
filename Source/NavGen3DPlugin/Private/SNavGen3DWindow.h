@@ -14,6 +14,6 @@ public:
 	void Construct(const FArguments& InArgs);
 
 private:
-	ECheckBoxState GetDrawNavMesh3DState() const;
-	void OnDrawNavMesh3DChanged(ECheckBoxState NewState);
+	ECheckBoxState GetDrawNavBounds3DState() const;
+	void OnDrawNavBounds3DChanged(ECheckBoxState NewState);
 };

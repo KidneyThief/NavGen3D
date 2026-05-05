@@ -16,18 +16,23 @@ void FNavGen3DPluginModule::StartupModule()
 {
 	FNavGen3DPluginEditorModeCommands::Register();
 
+	NavGen3DMenuGroup = WorkspaceMenu::GetMenuStructure().GetStructureRoot()->AddGroup(
+		LOCTEXT("NavGen3DMenuGroup", "NavGen3D")
+	);
+
 	FGlobalTabmanager::Get()->RegisterNomadTabSpawner(
 		NavGen3DTabName,
 		FOnSpawnTab::CreateRaw(this, &FNavGen3DPluginModule::SpawnNavGen3DTab)
 	)
 	.SetDisplayName(LOCTEXT("NavGen3DTabTitle", "NavGen3D"))
 	.SetMenuType(ETabSpawnerMenuType::Enabled)
-	.SetGroup(WorkspaceMenu::GetMenuStructure().GetLevelEditorCategory());
+	.SetGroup(NavGen3DMenuGroup.ToSharedRef());
 }
 
 void FNavGen3DPluginModule::ShutdownModule()
 {
 	FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(NavGen3DTabName);
+	NavGen3DMenuGroup.Reset();
 	FNavGen3DPluginEditorModeCommands::Unregister();
 }
 
