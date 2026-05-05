@@ -2,22 +2,42 @@
 
 #include "NavGen3DPluginModule.h"
 #include "NavGen3DPluginEditorModeCommands.h"
+#include "SNavGen3DWindow.h"
+#include "Framework/Docking/TabManager.h"
+#include "Widgets/Docking/SDockTab.h"
+#include "WorkspaceMenuStructure.h"
+#include "WorkspaceMenuStructureModule.h"
 
 #define LOCTEXT_NAMESPACE "NavGen3DPluginModule"
 
+const FName FNavGen3DPluginModule::NavGen3DTabName = "NavGen3DWindow";
+
 void FNavGen3DPluginModule::StartupModule()
 {
-	// This code will execute after your module is loaded into memory; the exact timing is specified in the .uplugin file per-module
-
 	FNavGen3DPluginEditorModeCommands::Register();
+
+	FGlobalTabmanager::Get()->RegisterNomadTabSpawner(
+		NavGen3DTabName,
+		FOnSpawnTab::CreateRaw(this, &FNavGen3DPluginModule::SpawnNavGen3DTab)
+	)
+	.SetDisplayName(LOCTEXT("NavGen3DTabTitle", "NavGen3D"))
+	.SetMenuType(ETabSpawnerMenuType::Enabled)
+	.SetGroup(WorkspaceMenu::GetMenuStructure().GetLevelEditorCategory());
 }
 
 void FNavGen3DPluginModule::ShutdownModule()
 {
-	// This function may be called during shutdown to clean up your module.  For modules that support dynamic reloading,
-	// we call this function before unloading the module.
-
+	FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(NavGen3DTabName);
 	FNavGen3DPluginEditorModeCommands::Unregister();
+}
+
+TSharedRef<SDockTab> FNavGen3DPluginModule::SpawnNavGen3DTab(const FSpawnTabArgs& SpawnTabArgs)
+{
+	return SNew(SDockTab)
+		.TabRole(ETabRole::NomadTab)
+		[
+			SNew(SNavGen3DWindow)
+		];
 }
 
 #undef LOCTEXT_NAMESPACE

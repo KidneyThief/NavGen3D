@@ -12,7 +12,6 @@
 // AddYourTool Step 1 - include the header file for your Tools here
 //////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////// 
-#include "Tools/NavGen3DPluginSimpleTool.h"
 #include "Tools/NavGen3DPluginInteractiveTool.h"
 
 // step 2: register a ToolBuilder in FNavGen3DPluginEditorMode::Enter() below
@@ -22,7 +21,6 @@
 
 const FEditorModeID UNavGen3DPluginEditorMode::EM_NavGen3DPluginEditorModeId = TEXT("EM_NavGen3DPluginEditorMode");
 
-FString UNavGen3DPluginEditorMode::SimpleToolName = TEXT("NavGen3DPlugin_ActorInfoTool");
 FString UNavGen3DPluginEditorMode::InteractiveToolName = TEXT("NavGen3DPlugin_MeasureDistanceTool");
 
 
@@ -59,11 +57,7 @@ void UNavGen3DPluginEditorMode::Enter()
 	////////////////////////////////////////////////////////////////////////// 
 	const FNavGen3DPluginEditorModeCommands& SampleToolCommands = FNavGen3DPluginEditorModeCommands::Get();
 
-	RegisterTool(SampleToolCommands.SimpleTool, SimpleToolName, NewObject<UNavGen3DPluginSimpleToolBuilder>(this));
 	RegisterTool(SampleToolCommands.InteractiveTool, InteractiveToolName, NewObject<UNavGen3DPluginInteractiveToolBuilder>(this));
-
-	// active tool type is not relevant here, we just set to default
-	GetToolManager()->SelectActiveToolType(EToolSide::Left, SimpleToolName);
 }
 
 void UNavGen3DPluginEditorMode::CreateToolkit()

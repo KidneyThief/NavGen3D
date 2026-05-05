@@ -22,7 +22,6 @@ class UNavGen3DPluginEditorMode : public UEdMode
 public:
 	const static FEditorModeID EM_NavGen3DPluginEditorModeId;
 
-	static FString SimpleToolName;
 	static FString InteractiveToolName;
 
 	UNavGen3DPluginEditorMode();

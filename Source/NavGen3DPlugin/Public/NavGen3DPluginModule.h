@@ -16,4 +16,9 @@ public:
 	/** IModuleInterface implementation */
 	virtual void StartupModule() override;
 	virtual void ShutdownModule() override;
+
+private:
+	TSharedRef<SDockTab> SpawnNavGen3DTab(const FSpawnTabArgs& SpawnTabArgs);
+
+	static const FName NavGen3DTabName;
 };

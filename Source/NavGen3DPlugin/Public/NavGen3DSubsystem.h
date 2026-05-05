@@ -16,4 +16,7 @@ public:
 	virtual void Deinitialize() override;
 
 	void OnEndFrame();
+
+	UPROPERTY()
+	bool DrawNavMesh3D = false;
 };

@@ -44,8 +44,9 @@ public class NavGen3DPlugin : ModuleRules
 				"UnrealEd",
 				"LevelEditor",
 				"InteractiveToolsFramework",
-				"EditorInteractiveToolsFramework"
-				// ... add private dependencies that you statically link with here ...	
+				"EditorInteractiveToolsFramework",
+				"WorkspaceMenuStructure"
+				// ... add private dependencies that you statically link with here ...
 			}
 			);
 		
