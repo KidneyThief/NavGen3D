@@ -2,6 +2,7 @@
 
 #include "NavGen3DPluginModule.h"
 #include "NavGen3DPluginEditorModeCommands.h"
+#include "NavGen3DSubsystem.h"
 #include "SNavGen3DWindow.h"
 #include "Framework/Docking/TabManager.h"
 #include "Widgets/Docking/SDockTab.h"
@@ -38,11 +39,14 @@ void FNavGen3DPluginModule::ShutdownModule()
 
 TSharedRef<SDockTab> FNavGen3DPluginModule::SpawnNavGen3DTab(const FSpawnTabArgs& SpawnTabArgs)
 {
+	TSharedRef<SNavGen3DWindow> Window = SNew(SNavGen3DWindow);
+	if (UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
+	{
+		Subsystem->SetNavGen3DWindow(Window);
+	}
 	return SNew(SDockTab)
 		.TabRole(ETabRole::NomadTab)
-		[
-			SNew(SNavGen3DWindow)
-		];
+		[Window];
 }
 
 #undef LOCTEXT_NAMESPACE

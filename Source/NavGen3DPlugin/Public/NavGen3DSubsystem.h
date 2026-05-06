@@ -5,7 +5,10 @@
 #include "CoreMinimal.h"
 #include "Subsystems/EngineSubsystem.h"
 #include "NavGen3DBoundsVolume.h"
+#include "NavGen3DLog.h"
 #include "NavGen3DSubsystem.generated.h"
+
+class SNavGen3DWindow;
 
 UCLASS()
 class NAVGEN3DPLUGIN_API UNavGen3DSubsystem : public UEngineSubsystem
@@ -21,6 +24,10 @@ public:
 	TArray<TObjectPtr<ANavGen3DBoundsVolume>> GetBoundsVolumes();
 	void AddBoundsVolume(ANavGen3DBoundsVolume* Volume);
 	void RemoveBoundsVolume(ANavGen3DBoundsVolume* Volume);
+	bool GenerateNavMesh3D(ANavGen3DBoundsVolume* Volume);
+	void ValidateEmbeddedBoundsVolumes();
+	void SetNavGen3DWindow(TSharedPtr<SNavGen3DWindow> Window);
+	void AddLogMessage(ENavGen3DLogCategory Category, const FString& ActorName, const FString& Message);
 
 	bool IsPlayMode()
 	{
@@ -40,4 +47,7 @@ public:
 
 	UPROPERTY()
 	TArray<TObjectPtr<ANavGen3DBoundsVolume>> BoundsVolumes;
+
+private:
+	TWeakPtr<SNavGen3DWindow> NavGen3DWindowPtr;
 };

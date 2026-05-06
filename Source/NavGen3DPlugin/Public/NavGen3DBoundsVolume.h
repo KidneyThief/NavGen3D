@@ -9,8 +9,9 @@
 UENUM(BlueprintType)
 enum class ENavGen3DBoundsVolumeStatus : uint8
 {
+	None = 0,
 	Unloaded,
-	Loading,
+	Streaming,
 	Loaded,
 	InPlay
 };
@@ -27,6 +28,18 @@ public:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
+	UFUNCTION(CallInEditor, Category = "NavGen3D")
+	void GenerateNavMesh3D();
+
 	UPROPERTY(BlueprintReadOnly, Category = "NavGen3D")
-	ENavGen3DBoundsVolumeStatus Status = ENavGen3DBoundsVolumeStatus::Unloaded;
+	ENavGen3DBoundsVolumeStatus Status = ENavGen3DBoundsVolumeStatus::None;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NavGen3D")
+	bool Enabled = true;
+
+	UPROPERTY(BlueprintReadOnly, Category = "NavGen3D")
+	bool Embedded = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "NavGen3D")
+	int32 MinVolumeSize = 200;
 };

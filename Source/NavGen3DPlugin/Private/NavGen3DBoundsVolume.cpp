@@ -26,6 +26,14 @@ ANavGen3DBoundsVolume::~ANavGen3DBoundsVolume()
 	}
 }
 
+void ANavGen3DBoundsVolume::GenerateNavMesh3D()
+{
+	if (UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
+	{
+		bool bSuccess = Subsystem->GenerateNavMesh3D(this);
+	}
+}
+
 void ANavGen3DBoundsVolume::BeginPlay()
 {
 	Super::BeginPlay();
@@ -34,6 +42,6 @@ void ANavGen3DBoundsVolume::BeginPlay()
 
 void ANavGen3DBoundsVolume::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-	Status = ENavGen3DBoundsVolumeStatus::Loaded;
+	Status = ENavGen3DBoundsVolumeStatus::None;
 	Super::EndPlay(EndPlayReason);
 }
