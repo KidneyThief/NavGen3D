@@ -2,6 +2,7 @@
 
 #include "NavGen3DBoundsVolume.h"
 #include "NavGen3DSubsystem.h"
+#include "NavGen3DSettings.h"
 
 ANavGen3DBoundsVolume::ANavGen3DBoundsVolume(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
@@ -24,6 +25,12 @@ ANavGen3DBoundsVolume::~ANavGen3DBoundsVolume()
 			Subsystem->RemoveBoundsVolume(this);
 		}
 	}
+}
+
+void ANavGen3DBoundsVolume::PostActorCreated()
+{
+	Super::PostActorCreated();
+	MinVolumeSize = GetDefault<UNavGen3DSettings>()->DefaultMinVolumeSize;
 }
 
 void ANavGen3DBoundsVolume::GenerateNavMesh3D()

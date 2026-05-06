@@ -25,6 +25,7 @@ public:
 	ANavGen3DBoundsVolume(const FObjectInitializer& ObjectInitializer);
 	virtual ~ANavGen3DBoundsVolume() override;
 
+	virtual void PostActorCreated() override;
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
@@ -41,5 +42,5 @@ public:
 	bool Embedded = false;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "NavGen3D")
-	int32 MinVolumeSize = 200;
+	int32 MinVolumeSize = 0;
 };
