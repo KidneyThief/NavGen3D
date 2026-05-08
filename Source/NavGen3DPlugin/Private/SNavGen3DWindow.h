@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "NavGen3DLog.h"
+#include "NavGen3DSubsystem.h"
 #include "Widgets/SCompoundWidget.h"
 #include "Widgets/Views/SListView.h"
 
@@ -18,12 +19,28 @@ public:
 
 private:
 	// Left panel
-	ECheckBoxState GetDrawNavBounds3DState() const;
-	void OnDrawNavBounds3DChanged(ECheckBoxState NewState);
+	ECheckBoxState GetDrawModeRadioState(ENavGen3DDrawMode Mode) const;
+	void OnDrawModeRadioChanged(ECheckBoxState NewState, ENavGen3DDrawMode Mode);
+	ECheckBoxState GetDrawCameraVolumeState() const;
+	void OnDrawCameraVolumeChanged(ECheckBoxState NewState);
 	FReply OnValidateEmbeddedBoundsVolumesClicked();
 	FReply OnGenerateNavMesh3DForSelectionClicked();
+	FReply OnProcessCameraVolumeClicked();
+	FReply OnValidateCameraVolumeClicked();
+	FReply OnResetNavMesh3DClicked();
+	FReply OnValidateNavMesh3DClicked();
+	float GetDebugDrawTime() const;
+	FText GetDebugDrawTimeText() const;
+	void OnDebugDrawTimeChanged(float NewValue);
+
+	// Stats panel
+	FText GetBoundsVolumeCountText() const;
+	FText GetUnprocessedVolumeCountText() const;
+	FText GetSolutionVolumeCountText() const;
 
 	// Right panel
+	FReply OnClearDebugClicked();
+	FReply OnClearLogClicked();
 	void OnSearchTextChanged(const FText& InText);
 	void RefreshFilteredLog();
 	TSharedRef<ITableRow> GenerateLogRow(TSharedPtr<FNavGen3DLogEntry> Item, const TSharedRef<STableViewBase>& OwnerTable);

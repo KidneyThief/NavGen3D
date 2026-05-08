@@ -18,4 +18,10 @@ public:
 
 	UPROPERTY(config, EditAnywhere, Category="Generation")
 	int32 DefaultMinVolumeSize = 100;
+
+	UPROPERTY(config, EditAnywhere, Category="Generation")
+	int32 MaxVolumeSize = 1000;
+
+	UPROPERTY(config, EditAnywhere, Category="Generation")
+	int32 MaxVolumeCount = 10000;
 };

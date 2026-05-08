@@ -6,6 +6,7 @@
 #include "SNavGen3DWindow.h"
 #include "Framework/Docking/TabManager.h"
 #include "Widgets/Docking/SDockTab.h"
+#include "Widgets/SWindow.h"
 #include "WorkspaceMenuStructure.h"
 #include "WorkspaceMenuStructureModule.h"
 
@@ -44,9 +45,23 @@ TSharedRef<SDockTab> FNavGen3DPluginModule::SpawnNavGen3DTab(const FSpawnTabArgs
 	{
 		Subsystem->SetNavGen3DWindow(Window);
 	}
-	return SNew(SDockTab)
+	TSharedRef<SDockTab> Tab = SNew(SDockTab)
 		.TabRole(ETabRole::NomadTab)
 		[Window];
+
+	Tab->SetOnTabActivated(SDockTab::FOnTabActivatedCallback::CreateLambda(
+		[](TSharedRef<SDockTab> InTab, ETabActivationCause)
+		{
+			if (TSharedPtr<SWindow> TabWindow = InTab->GetParentWindow())
+			{
+				TabWindow->SetSizeLimits(FWindowSizeLimits()
+					.SetMinWidth(620.0f)
+					.SetMinHeight(520.0f));
+			}
+		}
+	));
+
+	return Tab;
 }
 
 #undef LOCTEXT_NAMESPACE

@@ -37,7 +37,7 @@ void ANavGen3DBoundsVolume::GenerateNavMesh3D()
 {
 	if (UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
 	{
-		bool bSuccess = Subsystem->GenerateNavMesh3D(this);
+		bool bSuccess = Subsystem->GenerateNavMesh3DFromBoundsVolume(this);
 	}
 }
 
