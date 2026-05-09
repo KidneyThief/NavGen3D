@@ -19,14 +19,21 @@ public:
 
 private:
 	// Left panel
+	FText GetCameraLocationText() const;
+	FText GetCameraVolumeText() const;
 	ECheckBoxState GetDrawModeRadioState(ENavGen3DDrawMode InMode) const;
 	void OnDrawModeRadioChanged(ECheckBoxState InNewState, ENavGen3DDrawMode InMode);
 	ECheckBoxState GetDrawCameraVolumeState() const;
 	void OnDrawCameraVolumeChanged(ECheckBoxState InNewState);
+	float GetNavMeshAgentSliderValue() const;
+	float GetNavMeshAgentSliderMax() const;
+	void OnNavMeshAgentSliderChanged(float InNewValue);
+	FText GetNavMeshAgentText() const;
 	FReply OnValidateEmbeddedBoundsVolumesClicked();
 	FReply OnGenerateNavMesh3DForSelectionClicked();
 	FReply OnProcessCameraVolumeClicked();
 	FReply OnValidateCameraVolumeClicked();
+	FReply OnFindCameraVolumeNeighborsClicked();
 	FReply OnResetNavMesh3DClicked();
 	FReply OnValidateNavMesh3DClicked();
 	float GetDebugDrawTime() const;
@@ -39,12 +46,17 @@ private:
 	FText GetSolutionVolumeCountText() const;
 
 	// Right panel
+	FReply OnToggleLogPanelClicked();
+	EVisibility GetLogPanelVisibility() const;
+	FText GetToggleLogButtonText() const;
 	FReply OnClearDebugClicked();
 	FReply OnClearLogClicked();
 	void OnSearchTextChanged(const FText& InText);
 	void RefreshFilteredLog();
 	TSharedRef<ITableRow> GenerateLogRow(TSharedPtr<FNavGen3DLogEntry> InItem, const TSharedRef<STableViewBase>& InOwnerTable);
 
+	bool bLogPanelVisible = true;
+	float CachedExpandedWindowWidth = 620.0f;
 	TArray<TSharedPtr<FNavGen3DLogEntry>> LogEntries;
 	TArray<TSharedPtr<FNavGen3DLogEntry>> FilteredLogEntries;
 	TSharedPtr<SListView<TSharedPtr<FNavGen3DLogEntry>>> LogListView;

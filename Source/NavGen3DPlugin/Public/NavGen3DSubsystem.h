@@ -8,6 +8,7 @@
 #include "NavGen3DBoundsVolume.h"
 #include "NavGen3DLog.h"
 #include "NavMeshVolume.h"
+#include "NavVolumeConnection.h"
 #include "NavGen3DSubsystem.generated.h"
 
 UENUM()
@@ -49,6 +50,17 @@ public:
 
 	bool IsPlayMode();
 	FVector GetCameraLocation();
+	bool GetAgentSettings(int32 InIndex, float& OutRadius, float& OutHeight) const;
+	int32 GetSupportedAgentCount() const;
+	bool GenerateNavMesh3DNeighbors(int32 InAgentIndex);
+	NavMeshVolume* FindNavMeshVolumeByID(uint64 InID);
+	TArray<NavVolumeConnection> FindNavMeshVolumeConnections(const NavMeshVolume& InSourceVolume);
+	bool FindNavMeshVolumeConnection(const NavMeshVolume& InSourceVolume, const NavMeshVolume& InNeighborVolume, int32 InAxis, FVector& OutLocation);
+
+	static inline FString FVectorToString(const FVector& InVec)
+	{
+		return FString::Printf(TEXT("%.2f, %.2f, %.2f"), InVec.X, InVec.Y, InVec.Z);
+	}
 	int32 GetProcessVolumesCount() const { return ProcessVolumesList.Num(); }
 	int32 GetSolutionVolumesCount() const { return NavMeshSolutionMap.Num(); }
 	uint64 CalculateHash3D(const FVector& InVec) const;
@@ -66,6 +78,9 @@ public:
 	float DebugDrawTime = 0.0f;
 
 	UPROPERTY()
+	int32 DebugNavMeshAgentIndex = 0;
+
+	UPROPERTY()
 	float Epsilon = 0.1f;
 
 	UPROPERTY()
@@ -81,4 +96,8 @@ private:
 	TMap<uint64, NavMeshVolume> NavMeshSolutionMap;
 	TMap<uint64, TArray<uint64>> NavMeshSolutionMapByLocation;
 	TArray<NavMeshVolume> ProcessVolumesList;
+	TMap<uint64, uint64> NavMeshVolumeMap_X;
+	TMap<uint64, uint64> NavMeshVolumeMap_Y;
+	TMap<uint64, uint64> NavMeshVolumeMap_Z;
+	TMap<int32, TMap<uint64, NavVolumeConnection>> NavVolumeConnectionMap;
 };

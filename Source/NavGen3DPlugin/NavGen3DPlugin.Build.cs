@@ -46,7 +46,8 @@ public class NavGen3DPlugin : ModuleRules
 				"LevelEditor",
 				"InteractiveToolsFramework",
 				"EditorInteractiveToolsFramework",
-				"WorkspaceMenuStructure"
+				"WorkspaceMenuStructure",
+				"NavigationSystem"
 				// ... add private dependencies that you statically link with here ...
 			}
 			);
