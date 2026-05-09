@@ -38,7 +38,7 @@ void FNavGen3DPluginModule::ShutdownModule()
 	FNavGen3DPluginEditorModeCommands::Unregister();
 }
 
-TSharedRef<SDockTab> FNavGen3DPluginModule::SpawnNavGen3DTab(const FSpawnTabArgs& SpawnTabArgs)
+TSharedRef<SDockTab> FNavGen3DPluginModule::SpawnNavGen3DTab(const FSpawnTabArgs& InSpawnTabArgs)
 {
 	TSharedRef<SNavGen3DWindow> Window = SNew(SNavGen3DWindow);
 	if (UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())

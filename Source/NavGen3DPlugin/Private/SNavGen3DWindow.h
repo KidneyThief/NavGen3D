@@ -15,14 +15,14 @@ public:
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs);
-	void AddLogEntry(ENavGen3DLogCategory Category, const FString& ActorName, const FString& Message);
+	void AddLogEntry(ENavGen3DLogCategory InCategory, const FString& InActorName, const FString& InMessage);
 
 private:
 	// Left panel
-	ECheckBoxState GetDrawModeRadioState(ENavGen3DDrawMode Mode) const;
-	void OnDrawModeRadioChanged(ECheckBoxState NewState, ENavGen3DDrawMode Mode);
+	ECheckBoxState GetDrawModeRadioState(ENavGen3DDrawMode InMode) const;
+	void OnDrawModeRadioChanged(ECheckBoxState InNewState, ENavGen3DDrawMode InMode);
 	ECheckBoxState GetDrawCameraVolumeState() const;
-	void OnDrawCameraVolumeChanged(ECheckBoxState NewState);
+	void OnDrawCameraVolumeChanged(ECheckBoxState InNewState);
 	FReply OnValidateEmbeddedBoundsVolumesClicked();
 	FReply OnGenerateNavMesh3DForSelectionClicked();
 	FReply OnProcessCameraVolumeClicked();
@@ -31,7 +31,7 @@ private:
 	FReply OnValidateNavMesh3DClicked();
 	float GetDebugDrawTime() const;
 	FText GetDebugDrawTimeText() const;
-	void OnDebugDrawTimeChanged(float NewValue);
+	void OnDebugDrawTimeChanged(float InNewValue);
 
 	// Stats panel
 	FText GetBoundsVolumeCountText() const;
@@ -43,7 +43,7 @@ private:
 	FReply OnClearLogClicked();
 	void OnSearchTextChanged(const FText& InText);
 	void RefreshFilteredLog();
-	TSharedRef<ITableRow> GenerateLogRow(TSharedPtr<FNavGen3DLogEntry> Item, const TSharedRef<STableViewBase>& OwnerTable);
+	TSharedRef<ITableRow> GenerateLogRow(TSharedPtr<FNavGen3DLogEntry> InItem, const TSharedRef<STableViewBase>& InOwnerTable);
 
 	TArray<TSharedPtr<FNavGen3DLogEntry>> LogEntries;
 	TArray<TSharedPtr<FNavGen3DLogEntry>> FilteredLogEntries;

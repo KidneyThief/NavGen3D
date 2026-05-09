@@ -4,8 +4,8 @@
 #include "NavGen3DSubsystem.h"
 #include "NavGen3DSettings.h"
 
-ANavGen3DBoundsVolume::ANavGen3DBoundsVolume(const FObjectInitializer& ObjectInitializer)
-	: Super(ObjectInitializer)
+ANavGen3DBoundsVolume::ANavGen3DBoundsVolume(const FObjectInitializer& InObjectInitializer)
+	: Super(InObjectInitializer)
 {
 	if (!HasAnyFlags(RF_ClassDefaultObject) && GEngine)
 	{
@@ -30,7 +30,15 @@ ANavGen3DBoundsVolume::~ANavGen3DBoundsVolume()
 void ANavGen3DBoundsVolume::PostActorCreated()
 {
 	Super::PostActorCreated();
-	MinVolumeSize = GetDefault<UNavGen3DSettings>()->DefaultMinVolumeSize;
+	const UNavGen3DSettings* Settings = GetDefault<UNavGen3DSettings>();
+	MinVolumeSize = FMath::Max((float)Settings->DefaultMinVolumeSize, Settings->GeneratedMinVolumeSize);
+}
+
+void ANavGen3DBoundsVolume::PostEditChangeProperty(FPropertyChangedEvent& InPropertyChangedEvent)
+{
+	Super::PostEditChangeProperty(InPropertyChangedEvent);
+	const float GeneratedMin = GetDefault<UNavGen3DSettings>()->GeneratedMinVolumeSize;
+	MinVolumeSize = FMath::Max(MinVolumeSize, GeneratedMin);
 }
 
 void ANavGen3DBoundsVolume::GenerateNavMesh3D()
@@ -47,8 +55,8 @@ void ANavGen3DBoundsVolume::BeginPlay()
 	Status = ENavGen3DBoundsVolumeStatus::InPlay;
 }
 
-void ANavGen3DBoundsVolume::EndPlay(const EEndPlayReason::Type EndPlayReason)
+void ANavGen3DBoundsVolume::EndPlay(const EEndPlayReason::Type InEndPlayReason)
 {
 	Status = ENavGen3DBoundsVolumeStatus::None;
-	Super::EndPlay(EndPlayReason);
+	Super::EndPlay(InEndPlayReason);
 }

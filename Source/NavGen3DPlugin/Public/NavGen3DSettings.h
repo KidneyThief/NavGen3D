@@ -17,6 +17,9 @@ public:
 	virtual FName GetCategoryName() const override { return TEXT("Plugins"); }
 
 	UPROPERTY(config, EditAnywhere, Category="Generation")
+	float GeneratedMinVolumeSize = 50.0f;
+
+	UPROPERTY(config, EditAnywhere, Category="Generation")
 	int32 DefaultMinVolumeSize = 100;
 
 	UPROPERTY(config, EditAnywhere, Category="Generation")

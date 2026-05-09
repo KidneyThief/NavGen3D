@@ -27,33 +27,34 @@ class NAVGEN3DPLUGIN_API UNavGen3DSubsystem : public UEngineSubsystem
 	GENERATED_BODY()
 
 public:
-	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+	virtual void Initialize(FSubsystemCollectionBase& InCollection) override;
 	virtual void Deinitialize() override;
 
 	void OnEndFrame();
 
 	TArray<TObjectPtr<ANavGen3DBoundsVolume>> GetBoundsVolumes();
-	void AddBoundsVolume(ANavGen3DBoundsVolume* Volume);
-	void RemoveBoundsVolume(ANavGen3DBoundsVolume* Volume);
+	void AddBoundsVolume(ANavGen3DBoundsVolume* InVolume);
+	void RemoveBoundsVolume(ANavGen3DBoundsVolume* InVolume);
 	void InitializeNavMesh3D();
-	bool GenerateNavMesh3DFromBoundsVolume(ANavGen3DBoundsVolume* Volume);
-	bool GenerateNavMesh3D(NavMeshVolume* Volume = nullptr);
-	bool PlaneTrace(FVector Min, FVector Max, EAxis::Type Axis, FVector& OutImpactPoint);
-	bool AddNavMeshVolume(NavMeshVolume& Volume);
-	void RemoveNavMeshVolume(uint64 ID);
-	bool ProcessNavMeshVolume(NavMeshVolume& Volume);
+	bool GenerateNavMesh3DFromBoundsVolume(ANavGen3DBoundsVolume* InVolume);
+	bool GenerateNavMesh3D(NavMeshVolume* InVolume = nullptr);
+	bool PlaneTrace(FVector InMin, FVector InMax, EAxis::Type InAxis, FVector& OutImpactPoint, bool& OutStartPenetrating);
+	bool AddNavMeshVolume(NavMeshVolume& RefVolume);
+	void RemoveNavMeshVolume(uint64 InID);
+	bool ProcessNavMeshVolume(NavMeshVolume& RefVolume, bool InDrawDebug = false);
 	void ValidateEmbeddedBoundsVolumes();
-	bool ValidateNavMesh3D(NavMeshVolume* Volume = nullptr);
-	void SetNavGen3DWindow(TSharedPtr<SNavGen3DWindow> Window);
-	void AddLogMessage(ENavGen3DLogCategory Category, const FString& ActorName, const FString& Message);
+	bool ValidateNavMesh3D(NavMeshVolume* InVolume = nullptr);
+	void SetNavGen3DWindow(TSharedPtr<SNavGen3DWindow> InWindow);
+	void AddLogMessage(ENavGen3DLogCategory InCategory, const FString& InActorName, const FString& InMessage);
 
 	bool IsPlayMode();
 	FVector GetCameraLocation();
 	int32 GetProcessVolumesCount() const { return ProcessVolumesList.Num(); }
 	int32 GetSolutionVolumesCount() const { return NavMeshSolutionMap.Num(); }
-	uint64 CalculateHash3D(const FVector& Vec) const;
-	NavMeshVolume* FindVolumeContainingLocation(const FVector& Location);
-	TOptional<NavMeshVolume> FindGenerationVolumeContainingLocation(const FVector& Location, bool bRemoveFromProcessing);
+	uint64 CalculateHash3D(const FVector& InVec) const;
+	NavMeshVolume* FindVolumeContainingLocation(const FVector& InLocation);
+	TOptional<NavMeshVolume> FindGenerationVolumeContainingLocation(const FVector& InLocation, bool InRemoveFromProcessing);
+	TOptional<NavMeshVolume> FindClosestGenerationVolume(const FVector& InLocation, bool InRemoveFromProcessing);
 
 	UPROPERTY()
 	ENavGen3DDrawMode DebugDrawMode = ENavGen3DDrawMode::None;
@@ -63,6 +64,9 @@ public:
 
 	UPROPERTY()
 	float DebugDrawTime = 0.0f;
+
+	UPROPERTY()
+	float Epsilon = 0.1f;
 
 	UPROPERTY()
 	TArray<TObjectPtr<ANavGen3DBoundsVolume>> BoundsVolumes;

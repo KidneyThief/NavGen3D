@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git commit *)",
+      "Bash(git push *)",
+      "PowerShell(& \"C:\\\\Program Files \\(x86\\)\\\\Epic Games\\\\Launcher\\\\Engine\\\\Binaries\\\\Win64\\\\UnrealVersionSelector.exe\" /projectfiles \"C:\\\\cygwin64\\\\home\\\\kidne\\\\_DEV\\\\NavGen3D\\\\NavGen3D\\\\NavGen3D.uproject\")",
+      "Bash(git add *)",
+      "Bash(Get-ChildItem -Path \"C:\\\\cygwin64\\\\home\\\\kidne\\\\_DEV\\\\NavGen3D\\\\NavGen3D\\\\Plugins\\\\NavGen3DPlugin\" -Recurse -ErrorAction SilentlyContinue)",
+      "Bash(Select-Object -ExpandProperty FullName)",
+      "Bash(Sort-Object)",
+      "Bash(C:/Program Files/Epic Games/UE_5.3/Engine/Binaries/DotNET/UnrealBuildTool/UnrealBuildTool.exe *)",
+      "Bash(wait)",
+      "PowerShell(& \"C:\\\\Program Files \\(x86\\)\\\\Epic Games\\\\Launcher\\\\Engine\\\\Binaries\\\\Win64\\\\UnrealVersionSelector.exe\" -projectfiles \"C:\\\\cygwin64\\\\home\\\\kidne\\\\_DEV\\\\NavGen3D\\\\NavGen3D\\\\NavGen3D.uproject\"; Write-Host \"Exit: $LASTEXITCODE\")",
+      "Bash(git *)"
+    ]
+  }
+}

@@ -406,9 +406,9 @@ void SNavGen3DWindow::Construct(const FArguments& InArgs)
 	];
 }
 
-void SNavGen3DWindow::AddLogEntry(ENavGen3DLogCategory Category, const FString& ActorName, const FString& Message)
+void SNavGen3DWindow::AddLogEntry(ENavGen3DLogCategory InCategory, const FString& InActorName, const FString& InMessage)
 {
-	LogEntries.Add(MakeShared<FNavGen3DLogEntry>(Category, ActorName, Message));
+	LogEntries.Add(MakeShared<FNavGen3DLogEntry>(InCategory, InActorName, InMessage));
 	RefreshFilteredLog();
 }
 
@@ -430,11 +430,11 @@ FText SNavGen3DWindow::GetDebugDrawTimeText() const
 	return FText::FromString(TEXT("0.0s"));
 }
 
-void SNavGen3DWindow::OnDebugDrawTimeChanged(float NewValue)
+void SNavGen3DWindow::OnDebugDrawTimeChanged(float InNewValue)
 {
 	if (UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
 	{
-		Subsystem->DebugDrawTime = NewValue;
+		Subsystem->DebugDrawTime = InNewValue;
 	}
 }
 
@@ -480,31 +480,31 @@ void SNavGen3DWindow::RefreshFilteredLog()
 	}
 }
 
-TSharedRef<ITableRow> SNavGen3DWindow::GenerateLogRow(TSharedPtr<FNavGen3DLogEntry> Item, const TSharedRef<STableViewBase>& OwnerTable)
+TSharedRef<ITableRow> SNavGen3DWindow::GenerateLogRow(TSharedPtr<FNavGen3DLogEntry> InItem, const TSharedRef<STableViewBase>& InOwnerTable)
 {
-	return SNew(STableRow<TSharedPtr<FNavGen3DLogEntry>>, OwnerTable)
+	return SNew(STableRow<TSharedPtr<FNavGen3DLogEntry>>, InOwnerTable)
 		[
 			SNew(STextBlock)
-			.Text(FText::FromString(Item->Message))
+			.Text(FText::FromString(InItem->Message))
 		];
 }
 
-ECheckBoxState SNavGen3DWindow::GetDrawModeRadioState(ENavGen3DDrawMode Mode) const
+ECheckBoxState SNavGen3DWindow::GetDrawModeRadioState(ENavGen3DDrawMode InMode) const
 {
 	if (const UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
 	{
-		return Subsystem->DebugDrawMode == Mode ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+		return Subsystem->DebugDrawMode == InMode ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
 	}
-	return Mode == ENavGen3DDrawMode::None ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+	return InMode == ENavGen3DDrawMode::None ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
 }
 
-void SNavGen3DWindow::OnDrawModeRadioChanged(ECheckBoxState NewState, ENavGen3DDrawMode Mode)
+void SNavGen3DWindow::OnDrawModeRadioChanged(ECheckBoxState InNewState, ENavGen3DDrawMode InMode)
 {
-	if (NewState == ECheckBoxState::Checked)
+	if (InNewState == ECheckBoxState::Checked)
 	{
 		if (UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
 		{
-			Subsystem->DebugDrawMode = Mode;
+			Subsystem->DebugDrawMode = InMode;
 		}
 	}
 }
@@ -518,11 +518,11 @@ ECheckBoxState SNavGen3DWindow::GetDrawCameraVolumeState() const
 	return ECheckBoxState::Unchecked;
 }
 
-void SNavGen3DWindow::OnDrawCameraVolumeChanged(ECheckBoxState NewState)
+void SNavGen3DWindow::OnDrawCameraVolumeChanged(ECheckBoxState InNewState)
 {
 	if (UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
 	{
-		Subsystem->DrawCameraVolume = (NewState == ECheckBoxState::Checked);
+		Subsystem->DrawCameraVolume = (InNewState == ECheckBoxState::Checked);
 	}
 }
 
@@ -601,9 +601,13 @@ FReply SNavGen3DWindow::OnProcessCameraVolumeClicked()
 		const FVector CameraLocation = Subsystem->GetCameraLocation();
 
 		TOptional<NavMeshVolume> GenVolume = Subsystem->FindGenerationVolumeContainingLocation(CameraLocation, true);
+		if (!GenVolume.IsSet())
+		{
+			GenVolume = Subsystem->FindClosestGenerationVolume(CameraLocation, true);
+		}
 		if (GenVolume.IsSet())
 		{
-			Subsystem->ProcessNavMeshVolume(GenVolume.GetValue());
+			Subsystem->ProcessNavMeshVolume(GenVolume.GetValue(), true);
 		}
 	}
 	return FReply::Handled();

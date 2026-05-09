@@ -22,12 +22,13 @@ class NAVGEN3DPLUGIN_API ANavGen3DBoundsVolume : public AVolume
 	GENERATED_BODY()
 
 public:
-	ANavGen3DBoundsVolume(const FObjectInitializer& ObjectInitializer);
+	ANavGen3DBoundsVolume(const FObjectInitializer& InObjectInitializer);
 	virtual ~ANavGen3DBoundsVolume() override;
 
 	virtual void PostActorCreated() override;
+	virtual void PostEditChangeProperty(FPropertyChangedEvent& InPropertyChangedEvent) override;
 	virtual void BeginPlay() override;
-	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+	virtual void EndPlay(const EEndPlayReason::Type InEndPlayReason) override;
 
 	UFUNCTION(CallInEditor, Category = "NavGen3D")
 	void GenerateNavMesh3D();
@@ -42,5 +43,5 @@ public:
 	bool Embedded = false;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "NavGen3D")
-	int32 MinVolumeSize = 0;
+	float MinVolumeSize = 0.0f;
 };

@@ -12,9 +12,9 @@
 #include "LevelEditorViewport.h"
 #include "Editor.h"
 
-void UNavGen3DSubsystem::Initialize(FSubsystemCollectionBase& Collection)
+void UNavGen3DSubsystem::Initialize(FSubsystemCollectionBase& InCollection)
 {
-	Super::Initialize(Collection);
+	Super::Initialize(InCollection);
 	FCoreDelegates::OnEndFrame.AddUObject(this, &UNavGen3DSubsystem::OnEndFrame);
 }
 
@@ -79,37 +79,37 @@ bool UNavGen3DSubsystem::IsPlayMode()
 	return false;
 }
 
-void UNavGen3DSubsystem::AddBoundsVolume(ANavGen3DBoundsVolume* Volume)
+void UNavGen3DSubsystem::AddBoundsVolume(ANavGen3DBoundsVolume* InVolume)
 {
-	BoundsVolumes.AddUnique(Volume);
+	BoundsVolumes.AddUnique(InVolume);
 }
 
-void UNavGen3DSubsystem::RemoveBoundsVolume(ANavGen3DBoundsVolume* Volume)
+void UNavGen3DSubsystem::RemoveBoundsVolume(ANavGen3DBoundsVolume* InVolume)
 {
-	BoundsVolumes.Remove(Volume);
+	BoundsVolumes.Remove(InVolume);
 }
 
-void UNavGen3DSubsystem::SetNavGen3DWindow(TSharedPtr<SNavGen3DWindow> Window)
+void UNavGen3DSubsystem::SetNavGen3DWindow(TSharedPtr<SNavGen3DWindow> InWindow)
 {
-	NavGen3DWindowPtr = Window;
+	NavGen3DWindowPtr = InWindow;
 }
 
-void UNavGen3DSubsystem::AddLogMessage(ENavGen3DLogCategory Category, const FString& ActorName, const FString& Message)
+void UNavGen3DSubsystem::AddLogMessage(ENavGen3DLogCategory InCategory, const FString& InActorName, const FString& InMessage)
 {
 	static const TMap<ENavGen3DLogCategory, FString> CategoryLabels = {
 		{ ENavGen3DLogCategory::Info,    TEXT("Info")    },
 		{ ENavGen3DLogCategory::Warning, TEXT("Warning") },
 		{ ENavGen3DLogCategory::Error,   TEXT("Error")   }
 	};
-	const FString ResolvedName = ActorName.IsEmpty() ? TEXT("<unknown>") : ActorName;
-	const FString FormattedMessage = FString::Printf(TEXT("[%s] %s: %s"), *CategoryLabels[Category], *ResolvedName, *Message);
+	const FString ResolvedName = InActorName.IsEmpty() ? TEXT("<unknown>") : InActorName;
+	const FString FormattedMessage = FString::Printf(TEXT("[%s] %s: %s"), *CategoryLabels[InCategory], *ResolvedName, *InMessage);
 	if (TSharedPtr<SNavGen3DWindow> Window = NavGen3DWindowPtr.Pin())
 	{
-		Window->AddLogEntry(Category, ResolvedName, FormattedMessage);
+		Window->AddLogEntry(InCategory, ResolvedName, FormattedMessage);
 	}
 }
 
-uint64 UNavGen3DSubsystem::CalculateHash3D(const FVector& Vec) const
+uint64 UNavGen3DSubsystem::CalculateHash3D(const FVector& InVec) const
 {
 	const int32 GridSize = GetDefault<UNavGen3DSettings>()->MaxVolumeSize;
 
@@ -118,19 +118,23 @@ uint64 UNavGen3DSubsystem::CalculateHash3D(const FVector& Vec) const
 		return (uint64)(FMath::FloorToInt(Value / GridSize) & 0xFFFF);
 	};
 
-	return (ComponentHash(Vec.X) << 32) | (ComponentHash(Vec.Y) << 16) | ComponentHash(Vec.Z);
+	return (ComponentHash(InVec.X) << 32) | (ComponentHash(InVec.Y) << 16) | ComponentHash(InVec.Z);
 }
 
-bool UNavGen3DSubsystem::AddNavMeshVolume(NavMeshVolume& Volume)
+bool UNavGen3DSubsystem::AddNavMeshVolume(NavMeshVolume& RefVolume)
 {
+	const FVector Size = RefVolume.Bounds.GetSize();
+	if (Size.X < Epsilon || Size.Y < Epsilon || Size.Z < Epsilon)
+	{
+		return false;
+	}
+
 	const UNavGen3DSettings* Settings = GetDefault<UNavGen3DSettings>();
 
 	if (NavMeshSolutionMap.Num() >= Settings->MaxVolumeCount)
 	{
 		return false;
 	}
-
-	const FVector Size = Volume.Bounds.GetSize();
 
 	float MaxSize = Size.X;
 	EAxis::Type LongestAxis = EAxis::X;
@@ -139,15 +143,15 @@ bool UNavGen3DSubsystem::AddNavMeshVolume(NavMeshVolume& Volume)
 
 	if (MaxSize > Settings->MaxVolumeSize)
 	{
-		const float MidValue = (Volume.Bounds.Min.GetComponentForAxis(LongestAxis) + Volume.Bounds.Max.GetComponentForAxis(LongestAxis)) * 0.5f;
+		const float MidValue = (RefVolume.Bounds.Min.GetComponentForAxis(LongestAxis) + RefVolume.Bounds.Max.GetComponentForAxis(LongestAxis)) * 0.5f;
 
 		NavMeshVolume Half1;
-		Half1.Bounds.Min = Volume.Bounds.Min;
-		Half1.Bounds.Max = Volume.Bounds.Max;
+		Half1.Bounds.Min = RefVolume.Bounds.Min;
+		Half1.Bounds.Max = RefVolume.Bounds.Max;
 
 		NavMeshVolume Half2;
-		Half2.Bounds.Min = Volume.Bounds.Min;
-		Half2.Bounds.Max = Volume.Bounds.Max;
+		Half2.Bounds.Min = RefVolume.Bounds.Min;
+		Half2.Bounds.Max = RefVolume.Bounds.Max;
 
 		switch (LongestAxis)
 		{
@@ -160,61 +164,75 @@ bool UNavGen3DSubsystem::AddNavMeshVolume(NavMeshVolume& Volume)
 		return AddNavMeshVolume(Half1) && AddNavMeshVolume(Half2);
 	}
 
-	Volume.ID = ++NavMeshVolumeIDGenerator;
-	NavMeshSolutionMap.Add(Volume.ID, Volume);
+	RefVolume.ID = ++NavMeshVolumeIDGenerator;
+	NavMeshSolutionMap.Add(RefVolume.ID, RefVolume);
 
-	const uint64 LocationHash = CalculateHash3D(Volume.Bounds.GetCenter());
-	NavMeshSolutionMapByLocation.FindOrAdd(LocationHash).Add(Volume.ID);
+	const uint64 LocationHash = CalculateHash3D(RefVolume.Bounds.GetCenter());
+	NavMeshSolutionMapByLocation.FindOrAdd(LocationHash).Add(RefVolume.ID);
 
 	if (DebugDrawTime > 0.0f)
 	{
 		if (UWorld* World = FindWorld())
 		{
-			DrawDebugBox(World, Volume.Bounds.GetCenter(), Volume.Bounds.GetExtent(), FColor::Green, false, DebugDrawTime, 0, 5.0f);
+			DrawDebugBox(World, RefVolume.Bounds.GetCenter(), RefVolume.Bounds.GetExtent(), FColor::Green, false, DebugDrawTime, 0, 5.0f);
 		}
 	}
 
 	return true;
 }
 
-bool UNavGen3DSubsystem::ProcessNavMeshVolume(NavMeshVolume& Volume)
+bool UNavGen3DSubsystem::ProcessNavMeshVolume(NavMeshVolume& RefVolume, bool InDrawDebug)
 {
+	{
+		const FVector Size = RefVolume.Bounds.GetSize();
+		if (Size.X < Epsilon || Size.Y < Epsilon || Size.Z < Epsilon)
+		{
+			return false;
+		}
+	}
+
 	UWorld* World = FindWorld();
+	const FString ActorName = RefVolume.ParentBoundsVolume.IsValid() ? RefVolume.ParentBoundsVolume->GetActorLabel() : TEXT("<unknown>");
 
 	FVector ImpactPoint;
-	const FVector BoundsCenter = (Volume.Bounds.Min + Volume.Bounds.Max) * 0.5f;
+	const FVector BoundsCenter = (RefVolume.Bounds.Min + RefVolume.Bounds.Max) * 0.5f;
 
 	float GreatestDistance = -1.0f;
-	FVector FarthestTraceStart = FVector::ZeroVector;
 	EAxis::Type FarthestAxis = EAxis::None;
 	bool bFarthestFromMin = false;
 	FVector FarthestImpactPoint = FVector::ZeroVector;
+	int32 StartPenetratingCount = 0;
 
 	auto CheckTrace = [&](EAxis::Type Axis, bool bFromMin)
 	{
 		FVector TraceStart = BoundsCenter;
 		switch (Axis)
 		{
-			case EAxis::X: TraceStart.X = bFromMin ? Volume.Bounds.Min.X : Volume.Bounds.Max.X; break;
-			case EAxis::Y: TraceStart.Y = bFromMin ? Volume.Bounds.Min.Y : Volume.Bounds.Max.Y; break;
-			case EAxis::Z: TraceStart.Z = bFromMin ? Volume.Bounds.Min.Z : Volume.Bounds.Max.Z; break;
+			case EAxis::X: TraceStart.X = bFromMin ? RefVolume.Bounds.Min.X : RefVolume.Bounds.Max.X; break;
+			case EAxis::Y: TraceStart.Y = bFromMin ? RefVolume.Bounds.Min.Y : RefVolume.Bounds.Max.Y; break;
+			case EAxis::Z: TraceStart.Z = bFromMin ? RefVolume.Bounds.Min.Z : RefVolume.Bounds.Max.Z; break;
 			default: break;
 		}
 
-		FVector TraceFirst  = bFromMin ? Volume.Bounds.Min : Volume.Bounds.Max;
-		FVector TraceSecond = bFromMin ? Volume.Bounds.Max : Volume.Bounds.Min;
+		FVector TraceFirst  = bFromMin ? RefVolume.Bounds.Min : RefVolume.Bounds.Max;
+		FVector TraceSecond = bFromMin ? RefVolume.Bounds.Max : RefVolume.Bounds.Min;
 
-		if (PlaneTrace(TraceFirst, TraceSecond, Axis, ImpactPoint))
+		bool bStartPenetrating = false;
+		if (PlaneTrace(TraceFirst, TraceSecond, Axis, ImpactPoint, bStartPenetrating))
 		{
-			float Distance = FVector::Dist(ImpactPoint, TraceStart);
+			const float Distance = FVector::Dist(ImpactPoint, TraceStart);
 			if (Distance > GreatestDistance)
 			{
 				GreatestDistance = Distance;
-				FarthestTraceStart = TraceStart;
 				FarthestAxis = Axis;
 				bFarthestFromMin = bFromMin;
 				FarthestImpactPoint = ImpactPoint;
 			}
+		}
+
+		if (bStartPenetrating)
+		{
+			++StartPenetratingCount;
 		}
 	};
 
@@ -230,56 +248,151 @@ bool UNavGen3DSubsystem::ProcessNavMeshVolume(NavMeshVolume& Volume)
 		const float SplitValue = FarthestImpactPoint.GetComponentForAxis(FarthestAxis);
 
 		NavMeshVolume NavVolumeFound;
-		NavVolumeFound.Bounds.Min = Volume.Bounds.Min;
-		NavVolumeFound.Bounds.Max = Volume.Bounds.Max;
-		NavVolumeFound.ParentBoundsVolume = Volume.ParentBoundsVolume;
+		NavVolumeFound.Bounds.Min = RefVolume.Bounds.Min;
+		NavVolumeFound.Bounds.Max = RefVolume.Bounds.Max;
+		NavVolumeFound.ParentBoundsVolume = RefVolume.ParentBoundsVolume;
 
 		NavMeshVolume NavVolumeRemainder;
-		NavVolumeRemainder.Bounds.Min = Volume.Bounds.Min;
-		NavVolumeRemainder.Bounds.Max = Volume.Bounds.Max;
-		NavVolumeRemainder.ParentBoundsVolume = Volume.ParentBoundsVolume;
+		NavVolumeRemainder.Bounds.Min = RefVolume.Bounds.Min;
+		NavVolumeRemainder.Bounds.Max = RefVolume.Bounds.Max;
+		NavVolumeRemainder.ParentBoundsVolume = RefVolume.ParentBoundsVolume;
 
-		switch (FarthestAxis)
+		// Clear space lies between the starting plane and the impact point.
+		// Split so NavVolumeFound takes that clear slice and NavVolumeRemainder takes what's left.
+		if (bFarthestFromMin)
 		{
-			case EAxis::X:
-				NavVolumeFound.Bounds.Min.X = SplitValue;
-				NavVolumeRemainder.Bounds.Max.X = SplitValue;
-				break;
-			case EAxis::Y:
-				NavVolumeFound.Bounds.Min.Y = SplitValue;
-				NavVolumeRemainder.Bounds.Max.Y = SplitValue;
-				break;
-			case EAxis::Z:
-				NavVolumeFound.Bounds.Min.Z = SplitValue;
-				NavVolumeRemainder.Bounds.Max.Z = SplitValue;
-				break;
-			default:
-				break;
+			// Traced from Min side: clear space is Min → SplitValue
+			switch (FarthestAxis)
+			{
+				case EAxis::X: NavVolumeFound.Bounds.Max.X = SplitValue; NavVolumeRemainder.Bounds.Min.X = SplitValue; break;
+				case EAxis::Y: NavVolumeFound.Bounds.Max.Y = SplitValue; NavVolumeRemainder.Bounds.Min.Y = SplitValue; break;
+				case EAxis::Z: NavVolumeFound.Bounds.Max.Z = SplitValue; NavVolumeRemainder.Bounds.Min.Z = SplitValue; break;
+				default: break;
+			}
+		}
+		else
+		{
+			// Traced from Max side: clear space is SplitValue → Max
+			switch (FarthestAxis)
+			{
+				case EAxis::X: NavVolumeFound.Bounds.Min.X = SplitValue; NavVolumeRemainder.Bounds.Max.X = SplitValue; break;
+				case EAxis::Y: NavVolumeFound.Bounds.Min.Y = SplitValue; NavVolumeRemainder.Bounds.Max.Y = SplitValue; break;
+				case EAxis::Z: NavVolumeFound.Bounds.Min.Z = SplitValue; NavVolumeRemainder.Bounds.Max.Z = SplitValue; break;
+				default: break;
+			}
 		}
 
 		AddNavMeshVolume(NavVolumeFound);
-		ProcessVolumesList.Add(NavVolumeRemainder);
 
-		if (World && DebugDrawTime > 0.0f)
+		if (InDrawDebug)
 		{
-			DrawDebugSphere(World, FarthestImpactPoint, 10.0f, 8, FColor::Orange, false, DebugDrawTime);
-			DrawDebugBox(World, NavVolumeRemainder.Bounds.GetCenter(), NavVolumeRemainder.Bounds.GetExtent(), FColor::Red, false, DebugDrawTime, 0, 5.0f);
+			AddLogMessage(ENavGen3DLogCategory::Info, ActorName,
+				FString::Printf(TEXT("Added solution volume ID:%llu Extent:%s"), NavVolumeFound.ID, *NavVolumeFound.Bounds.GetExtent().ToString()));
+			if (World)
+			{
+				DrawDebugSphere(World, FarthestImpactPoint, 10.0f, 8, FColor::Orange, false, DebugDrawTime);
+			}
+		}
+
+		const float MinVolumeSize = RefVolume.ParentBoundsVolume.IsValid() ? RefVolume.ParentBoundsVolume->MinVolumeSize : 0.0f;
+		const FVector RemainderSize = NavVolumeRemainder.Bounds.GetSize();
+		const float OriginalAxisSize = RefVolume.Bounds.GetSize().GetComponentForAxis(FarthestAxis);
+		const float RemainderAxisSize = RemainderSize.GetComponentForAxis(FarthestAxis);
+		const bool bMadeProgress = RemainderAxisSize < OriginalAxisSize;
+		if (bMadeProgress && FMath::Max3(RemainderSize.X, RemainderSize.Y, RemainderSize.Z) >= MinVolumeSize)
+		{
+			ProcessVolumesList.Add(NavVolumeRemainder);
+			if (InDrawDebug)
+			{
+				AddLogMessage(ENavGen3DLogCategory::Info, ActorName,
+					FString::Printf(TEXT("Queued remainder volume Extent:%s"), *NavVolumeRemainder.Bounds.GetExtent().ToString()));
+				if (World)
+				{
+					DrawDebugBox(World, NavVolumeRemainder.Bounds.GetCenter(), NavVolumeRemainder.Bounds.GetExtent(), FColor::Red, false, DebugDrawTime, 0, 5.0f);
+				}
+			}
+		}
+	}
+	else if (StartPenetratingCount == 6)
+	{
+		// All traces started penetrating: volume is fully inside geometry, split along longest axis
+		const FVector Size = RefVolume.Bounds.GetSize();
+		EAxis::Type LongestAxis = EAxis::X;
+		float MaxDim = Size.X;
+		if (Size.Y > MaxDim) { MaxDim = Size.Y; LongestAxis = EAxis::Y; }
+		if (Size.Z > MaxDim) { MaxDim = Size.Z; LongestAxis = EAxis::Z; }
+
+		const float MidValue = (RefVolume.Bounds.Min.GetComponentForAxis(LongestAxis) + RefVolume.Bounds.Max.GetComponentForAxis(LongestAxis)) * 0.5f;
+
+		NavMeshVolume Half1;
+		Half1.Bounds.Min = RefVolume.Bounds.Min;
+		Half1.Bounds.Max = RefVolume.Bounds.Max;
+		Half1.ParentBoundsVolume = RefVolume.ParentBoundsVolume;
+
+		NavMeshVolume Half2;
+		Half2.Bounds.Min = RefVolume.Bounds.Min;
+		Half2.Bounds.Max = RefVolume.Bounds.Max;
+		Half2.ParentBoundsVolume = RefVolume.ParentBoundsVolume;
+
+		switch (LongestAxis)
+		{
+			case EAxis::X: Half1.Bounds.Max.X = MidValue; Half2.Bounds.Min.X = MidValue; break;
+			case EAxis::Y: Half1.Bounds.Max.Y = MidValue; Half2.Bounds.Min.Y = MidValue; break;
+			case EAxis::Z: Half1.Bounds.Max.Z = MidValue; Half2.Bounds.Min.Z = MidValue; break;
+			default: break;
+		}
+
+		const float MinVolumeSize = RefVolume.ParentBoundsVolume.IsValid() ? RefVolume.ParentBoundsVolume->MinVolumeSize : 0.0f;
+
+		auto LongestDim = [](const NavMeshVolume& V) -> float
+		{
+			const FVector S = V.Bounds.GetSize();
+			return FMath::Max3(S.X, S.Y, S.Z);
+		};
+
+		if (LongestDim(Half1) >= MinVolumeSize)
+		{
+			ProcessVolumesList.Add(Half1);
+			if (InDrawDebug)
+			{
+				AddLogMessage(ENavGen3DLogCategory::Info, ActorName,
+					FString::Printf(TEXT("Queued remainder volume Extent:%s"), *Half1.Bounds.GetExtent().ToString()));
+			}
+		}
+		if (LongestDim(Half2) >= MinVolumeSize)
+		{
+			ProcessVolumesList.Add(Half2);
+			if (InDrawDebug)
+			{
+				AddLogMessage(ENavGen3DLogCategory::Info, ActorName,
+					FString::Printf(TEXT("Queued remainder volume Extent:%s"), *Half2.Bounds.GetExtent().ToString()));
+			}
+		}
+	}
+	else if (StartPenetratingCount == 0)
+	{
+		// No collision in any direction: volume is clear, add to solution
+		AddNavMeshVolume(RefVolume);
+		if (InDrawDebug)
+		{
+			AddLogMessage(ENavGen3DLogCategory::Info, ActorName,
+				FString::Printf(TEXT("Added solution volume ID:%llu Extent:%s"), RefVolume.ID, *RefVolume.Bounds.GetExtent().ToString()));
 		}
 	}
 
 	return false;
 }
 
-NavMeshVolume* UNavGen3DSubsystem::FindVolumeContainingLocation(const FVector& Location)
+NavMeshVolume* UNavGen3DSubsystem::FindVolumeContainingLocation(const FVector& InLocation)
 {
-	const uint64 LocationHash = CalculateHash3D(Location);
+	const uint64 LocationHash = CalculateHash3D(InLocation);
 	if (const TArray<uint64>* VolumeIDs = NavMeshSolutionMapByLocation.Find(LocationHash))
 	{
 		for (uint64 VolumeID : *VolumeIDs)
 		{
 			if (NavMeshVolume* Volume = NavMeshSolutionMap.Find(VolumeID))
 			{
-				if (Volume->Bounds.IsInsideOrOn(Location))
+				if (Volume->Bounds.IsInsideOrOn(InLocation))
 				{
 					return Volume;
 				}
@@ -289,14 +402,14 @@ NavMeshVolume* UNavGen3DSubsystem::FindVolumeContainingLocation(const FVector& L
 	return nullptr;
 }
 
-TOptional<NavMeshVolume> UNavGen3DSubsystem::FindGenerationVolumeContainingLocation(const FVector& Location, bool bRemoveFromProcessing)
+TOptional<NavMeshVolume> UNavGen3DSubsystem::FindGenerationVolumeContainingLocation(const FVector& InLocation, bool InRemoveFromProcessing)
 {
 	for (int32 i = 0; i < ProcessVolumesList.Num(); ++i)
 	{
-		if (ProcessVolumesList[i].Bounds.IsInsideOrOn(Location))
+		if (ProcessVolumesList[i].Bounds.IsInsideOrOn(InLocation))
 		{
 			NavMeshVolume Result = ProcessVolumesList[i];
-			if (bRemoveFromProcessing)
+			if (InRemoveFromProcessing)
 			{
 				ProcessVolumesList.RemoveAtSwap(i);
 			}
@@ -316,7 +429,7 @@ TOptional<NavMeshVolume> UNavGen3DSubsystem::FindGenerationVolumeContainingLocat
 			FVector Origin;
 			FVector Extent;
 			BoundsVolume->GetActorBounds(false, Origin, Extent);
-			if (FBox::BuildAABB(Origin, Extent).IsInsideOrOn(Location))
+			if (FBox::BuildAABB(Origin, Extent).IsInsideOrOn(InLocation))
 			{
 				NavMeshVolume Result;
 				Result.Bounds = FBox::BuildAABB(Origin, Extent);
@@ -329,46 +442,103 @@ TOptional<NavMeshVolume> UNavGen3DSubsystem::FindGenerationVolumeContainingLocat
 	return TOptional<NavMeshVolume>();
 }
 
-void UNavGen3DSubsystem::RemoveNavMeshVolume(uint64 ID)
+TOptional<NavMeshVolume> UNavGen3DSubsystem::FindClosestGenerationVolume(const FVector& InLocation, bool InRemoveFromProcessing)
 {
-	if (NavMeshVolume* Volume = NavMeshSolutionMap.Find(ID))
+	if (!ProcessVolumesList.IsEmpty())
+	{
+		float ClosestDistSq = FLT_MAX;
+		int32 ClosestIdx = INDEX_NONE;
+		for (int32 i = 0; i < ProcessVolumesList.Num(); ++i)
+		{
+			const float DistSq = FVector::DistSquared(ProcessVolumesList[i].Bounds.GetCenter(), InLocation);
+			if (DistSq < ClosestDistSq)
+			{
+				ClosestDistSq = DistSq;
+				ClosestIdx = i;
+			}
+		}
+
+		if (ClosestIdx != INDEX_NONE)
+		{
+			NavMeshVolume Result = ProcessVolumesList[ClosestIdx];
+			if (InRemoveFromProcessing)
+			{
+				ProcessVolumesList.RemoveAtSwap(ClosestIdx);
+			}
+			return Result;
+		}
+		return TOptional<NavMeshVolume>();
+	}
+
+	float ClosestDistSq = FLT_MAX;
+	NavMeshVolume ClosestVolume;
+	bool bFound = false;
+	for (ANavGen3DBoundsVolume* BoundsVolume : GetBoundsVolumes())
+	{
+		if (!BoundsVolume || !BoundsVolume->Enabled || BoundsVolume->Embedded)
+		{
+			continue;
+		}
+
+		FVector Origin;
+		FVector Extent;
+		BoundsVolume->GetActorBounds(false, Origin, Extent);
+		const FBox Box = FBox::BuildAABB(Origin, Extent);
+		const float DistSq = FVector::DistSquared(Box.GetCenter(), InLocation);
+		if (DistSq < ClosestDistSq)
+		{
+			ClosestDistSq = DistSq;
+			ClosestVolume.Bounds = Box;
+			ClosestVolume.ParentBoundsVolume = BoundsVolume;
+			bFound = true;
+		}
+	}
+
+	return bFound ? TOptional<NavMeshVolume>(ClosestVolume) : TOptional<NavMeshVolume>();
+}
+
+void UNavGen3DSubsystem::RemoveNavMeshVolume(uint64 InID)
+{
+	if (NavMeshVolume* Volume = NavMeshSolutionMap.Find(InID))
 	{
 		const uint64 LocationHash = CalculateHash3D(Volume->Bounds.GetCenter());
 		if (TArray<uint64>* VolumeIDs = NavMeshSolutionMapByLocation.Find(LocationHash))
 		{
-			VolumeIDs->Remove(ID);
+			VolumeIDs->Remove(InID);
 			if (VolumeIDs->IsEmpty())
 			{
 				NavMeshSolutionMapByLocation.Remove(LocationHash);
 			}
 		}
 	}
-	NavMeshSolutionMap.Remove(ID);
+	NavMeshSolutionMap.Remove(InID);
 }
 
-bool UNavGen3DSubsystem::PlaneTrace(FVector Min, FVector Max, EAxis::Type Axis, FVector& OutImpactPoint)
+bool UNavGen3DSubsystem::PlaneTrace(FVector InMin, FVector InMax, EAxis::Type InAxis, FVector& OutImpactPoint, bool& OutStartPenetrating)
 {
-	FVector Center = (Min + Max) * 0.5f;
-	FVector HalfExtent = (Max - Min) * 0.5f;
+	OutStartPenetrating = false;
+
+	FVector Center = (InMin + InMax) * 0.5f;
+	FVector HalfExtent = (InMax - InMin) * 0.5f;
 	FVector Start = Center;
 	FVector End = Center;
 
-	switch (Axis)
+	switch (InAxis)
 	{
 		case EAxis::X:
 			HalfExtent.X = 0.0f;
-			Start.X = Min.X;
-			End.X = Max.X;
+			Start.X = InMin.X;
+			End.X = InMax.X;
 			break;
 		case EAxis::Y:
 			HalfExtent.Y = 0.0f;
-			Start.Y = Min.Y;
-			End.Y = Max.Y;
+			Start.Y = InMin.Y;
+			End.Y = InMax.Y;
 			break;
 		case EAxis::Z:
 			HalfExtent.Z = 0.0f;
-			Start.Z = Min.Z;
-			End.Z = Max.Z;
+			Start.Z = InMin.Z;
+			End.Z = InMax.Z;
 			break;
 		default:
 			return false;
@@ -387,9 +557,19 @@ bool UNavGen3DSubsystem::PlaneTrace(FVector Min, FVector Max, EAxis::Type Axis, 
 	FCollisionShape BoxShape = FCollisionShape::MakeBox(HalfExtent);
 	if (World->SweepSingleByChannel(HitResult, Start, End, FQuat::Identity, ECC_WorldStatic, BoxShape))
 	{
-		if (HitResult.bBlockingHit && !HitResult.bStartPenetrating)
+		if (HitResult.bStartPenetrating)
+		{
+			OutStartPenetrating = true;
+			return false;
+		}
+		if (HitResult.bBlockingHit)
 		{
 			OutImpactPoint = HitResult.ImpactPoint;
+			if (FMath::IsNearlyEqual(OutImpactPoint.GetComponentForAxis(InAxis), Start.GetComponentForAxis(InAxis)))
+			{
+				OutStartPenetrating = true;
+				return false;
+			}
 			return true;
 		}
 	}
@@ -397,11 +577,11 @@ bool UNavGen3DSubsystem::PlaneTrace(FVector Min, FVector Max, EAxis::Type Axis, 
 	return false;
 }
 
-bool UNavGen3DSubsystem::GenerateNavMesh3D(NavMeshVolume* Volume)
+bool UNavGen3DSubsystem::GenerateNavMesh3D(NavMeshVolume* InVolume)
 {
-	if (Volume)
+	if (InVolume)
 	{
-		return ProcessNavMeshVolume(*Volume);
+		return ProcessNavMeshVolume(*InVolume);
 	}
 
 	while (!ProcessVolumesList.IsEmpty())
@@ -426,14 +606,14 @@ void UNavGen3DSubsystem::InitializeNavMesh3D()
 	AddLogMessage(ENavGen3DLogCategory::Info, TEXT(""), TEXT("NavMesh3D initialized"));
 }
 
-bool UNavGen3DSubsystem::GenerateNavMesh3DFromBoundsVolume(ANavGen3DBoundsVolume* Volume)
+bool UNavGen3DSubsystem::GenerateNavMesh3DFromBoundsVolume(ANavGen3DBoundsVolume* InVolume)
 {
 	ProcessVolumesList.Reset();
 
-	const FString ActorName = Volume ? Volume->GetActorLabel() : TEXT("<unknown>");
+	const FString ActorName = InVolume ? InVolume->GetActorLabel() : TEXT("<unknown>");
 	AddLogMessage(ENavGen3DLogCategory::Info, ActorName, TEXT("generating NavMesh3D..."));
 
-	bool bSuccess = Volume != nullptr;
+	bool bSuccess = InVolume != nullptr;
 	FString Result = bSuccess ? TEXT("success") : TEXT("fail");
 	if (IsPlayMode())
 	{
@@ -443,7 +623,7 @@ bool UNavGen3DSubsystem::GenerateNavMesh3DFromBoundsVolume(ANavGen3DBoundsVolume
 
 	ValidateEmbeddedBoundsVolumes();
 
-	if (bSuccess && Volume->Embedded)
+	if (bSuccess && InVolume->Embedded)
 	{
 		bSuccess = false;
 		Result = TEXT("Embedded volume invalid for generation.  Generate from the encompassing bounds volume.");
@@ -453,11 +633,11 @@ bool UNavGen3DSubsystem::GenerateNavMesh3DFromBoundsVolume(ANavGen3DBoundsVolume
 	{
 		FVector Origin;
 		FVector Extent;
-		Volume->GetActorBounds(false, Origin, Extent);
+		InVolume->GetActorBounds(false, Origin, Extent);
 
 		NavMeshVolume NavVolume;
 		NavVolume.Bounds = FBox::BuildAABB(Origin, Extent);
-		NavVolume.ParentBoundsVolume = Volume;
+		NavVolume.ParentBoundsVolume = InVolume;
 		ProcessVolumesList.Add(NavVolume);
 
 		bSuccess = GenerateNavMesh3D(nullptr);
@@ -471,9 +651,9 @@ bool UNavGen3DSubsystem::GenerateNavMesh3DFromBoundsVolume(ANavGen3DBoundsVolume
 	return bSuccess;
 }
 
-bool UNavGen3DSubsystem::ValidateNavMesh3D(NavMeshVolume* Volume)
+bool UNavGen3DSubsystem::ValidateNavMesh3D(NavMeshVolume* InVolume)
 {
-	if (!Volume)
+	if (!InVolume)
 	{
 		bool bAllValid = true;
 		for (auto& Pair : NavMeshSolutionMap)
@@ -487,15 +667,16 @@ bool UNavGen3DSubsystem::ValidateNavMesh3D(NavMeshVolume* Volume)
 	}
 
 	FVector ImpactPoint;
-	if (PlaneTrace(Volume->Bounds.Min, Volume->Bounds.Max, EAxis::X, ImpactPoint) ||
-		PlaneTrace(Volume->Bounds.Min, Volume->Bounds.Max, EAxis::Y, ImpactPoint) ||
-		PlaneTrace(Volume->Bounds.Min, Volume->Bounds.Max, EAxis::Z, ImpactPoint))
+	bool bIgnored = false;
+	if (PlaneTrace(InVolume->Bounds.Min, InVolume->Bounds.Max, EAxis::X, ImpactPoint, bIgnored) ||
+		PlaneTrace(InVolume->Bounds.Min, InVolume->Bounds.Max, EAxis::Y, ImpactPoint, bIgnored) ||
+		PlaneTrace(InVolume->Bounds.Min, InVolume->Bounds.Max, EAxis::Z, ImpactPoint, bIgnored))
 	{
-		const FString ActorName = Volume->ParentBoundsVolume.IsValid()
-			? Volume->ParentBoundsVolume->GetActorLabel()
+		const FString ActorName = InVolume->ParentBoundsVolume.IsValid()
+			? InVolume->ParentBoundsVolume->GetActorLabel()
 			: TEXT("<unknown>");
 		AddLogMessage(ENavGen3DLogCategory::Warning, ActorName,
-			FString::Printf(TEXT("Validation failed for volume ID %llu"), Volume->ID));
+			FString::Printf(TEXT("Validation failed for volume ID %llu"), InVolume->ID));
 		return false;
 	}
 
@@ -577,6 +758,7 @@ void UNavGen3DSubsystem::OnEndFrame()
 				break;
 			}
 
+			const float DrawTime = World->GetDeltaSeconds();
 			for (const TObjectPtr<ANavGen3DBoundsVolume>& Volume : BoundsVolumes)
 			{
 				if (!Volume)
@@ -601,7 +783,7 @@ void UNavGen3DSubsystem::OnEndFrame()
 				FVector Origin;
 				FVector Extent;
 				Volume->GetActorBounds(false, Origin, Extent);
-				DrawDebugBox(World, Origin, Extent, Volume->GetActorRotation().Quaternion(), DrawColor, false, -1.0f, 0, 5.0f);
+				DrawDebugBox(World, Origin, Extent, Volume->GetActorRotation().Quaternion(), DrawColor, false, DrawTime, 0, 5.0f);
 			}
 			break;
 		}
@@ -610,10 +792,11 @@ void UNavGen3DSubsystem::OnEndFrame()
 		{
 			if (UWorld* World = FindWorld())
 			{
+				const float DrawTime = World->GetDeltaSeconds();
 				for (const auto& Pair : NavMeshSolutionMap)
 				{
 					const NavMeshVolume& Volume = Pair.Value;
-					DrawDebugBox(World, Volume.Bounds.GetCenter(), Volume.Bounds.GetExtent(), FColor::Cyan, false, -1.0f, 0, 3.0f);
+					DrawDebugBox(World, Volume.Bounds.GetCenter(), Volume.Bounds.GetExtent(), FColor::Cyan, false, DrawTime, 0, 3.0f);
 				}
 			}
 			break;
@@ -623,9 +806,10 @@ void UNavGen3DSubsystem::OnEndFrame()
 		{
 			if (UWorld* World = FindWorld())
 			{
+				const float DrawTime = World->GetDeltaSeconds();
 				for (const NavMeshVolume& Volume : ProcessVolumesList)
 				{
-					DrawDebugBox(World, Volume.Bounds.GetCenter(), Volume.Bounds.GetExtent(), FColor::Yellow, false, -1.0f, 0, 3.0f);
+					DrawDebugBox(World, Volume.Bounds.GetCenter(), Volume.Bounds.GetExtent(), FColor::Yellow, false, DrawTime, 0, 3.0f);
 				}
 			}
 			break;
@@ -639,18 +823,19 @@ void UNavGen3DSubsystem::OnEndFrame()
 	{
 		if (UWorld* World = FindWorld())
 		{
+			const float DrawTime = World->GetDeltaSeconds();
 			const FVector CameraLocation = GetCameraLocation();
 
 			if (NavMeshVolume* Volume = FindVolumeContainingLocation(CameraLocation))
 			{
-				DrawDebugBox(World, Volume->Bounds.GetCenter(), Volume->Bounds.GetExtent(), FColor::Green, false, -1.0f, 0, 5.0f);
+				DrawDebugBox(World, Volume->Bounds.GetCenter(), Volume->Bounds.GetExtent(), FColor::Green, false, DrawTime, 0, 5.0f);
 			}
 			else
 			{
 				TOptional<NavMeshVolume> GenVolume = FindGenerationVolumeContainingLocation(CameraLocation, false);
 				if (GenVolume.IsSet())
 				{
-					DrawDebugBox(World, GenVolume->Bounds.GetCenter(), GenVolume->Bounds.GetExtent(), FColor::Orange, false, -1.0f, 0, 5.0f);
+					DrawDebugBox(World, GenVolume->Bounds.GetCenter(), GenVolume->Bounds.GetExtent(), FColor::Orange, false, DrawTime, 0, 5.0f);
 				}
 			}
 		}
