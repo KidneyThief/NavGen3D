@@ -122,7 +122,7 @@ void SNavGen3DWindow::Construct(const FArguments& InArgs)
 							.VAlign(VAlign_Center)
 							[
 								SNew(STextBlock)
-								.Text(FText::FromString("Draw Time:  "))
+								.Text(FText::FromString("NavMesh Agent:  "))
 								.ColorAndOpacity(TextColor)
 							]
 
@@ -132,9 +132,10 @@ void SNavGen3DWindow::Construct(const FArguments& InArgs)
 							[
 								SNew(SSlider)
 								.MinValue(0.0f)
-								.MaxValue(120.0f)
-								.Value(this, &SNavGen3DWindow::GetDebugDrawTime)
-								.OnValueChanged(this, &SNavGen3DWindow::OnDebugDrawTimeChanged)
+								.MaxValue(GetNavMeshAgentSliderMax())
+								.StepSize(1.0f)
+								.Value(this, &SNavGen3DWindow::GetNavMeshAgentSliderValue)
+								.OnValueChanged(this, &SNavGen3DWindow::OnNavMeshAgentSliderChanged)
 							]
 
 							+ SHorizontalBox::Slot()
@@ -143,7 +144,7 @@ void SNavGen3DWindow::Construct(const FArguments& InArgs)
 							.Padding(8.0f, 0.0f, 0.0f, 0.0f)
 							[
 								SNew(STextBlock)
-								.Text(this, &SNavGen3DWindow::GetDebugDrawTimeText)
+								.Text(this, &SNavGen3DWindow::GetNavMeshAgentText)
 								.ColorAndOpacity(TextColor)
 							]
 						]
@@ -242,6 +243,56 @@ void SNavGen3DWindow::Construct(const FArguments& InArgs)
 							.VAlign(VAlign_Center)
 							[
 								SNew(STextBlock)
+								.Text(FText::FromString("Draw Connections:  "))
+								.ColorAndOpacity(TextColor)
+							]
+
+							+ SHorizontalBox::Slot()
+							.AutoWidth()
+							.VAlign(VAlign_Center)
+							[
+								SNew(SCheckBox)
+								.IsChecked(this, &SNavGen3DWindow::GetDrawConnectionsState)
+								.OnCheckStateChanged(this, &SNavGen3DWindow::OnDrawConnectionsChanged)
+							]
+						]
+
+						+ SVerticalBox::Slot()
+						.AutoHeight()
+						.Padding(8.0f, 4.0f, 8.0f, 4.0f)
+						[
+							SNew(SHorizontalBox)
+
+							+ SHorizontalBox::Slot()
+							.AutoWidth()
+							.VAlign(VAlign_Center)
+							[
+								SNew(STextBlock)
+								.Text(FText::FromString("Draw Connected:  "))
+								.ColorAndOpacity(TextColor)
+							]
+
+							+ SHorizontalBox::Slot()
+							.AutoWidth()
+							.VAlign(VAlign_Center)
+							[
+								SNew(SCheckBox)
+								.IsChecked(this, &SNavGen3DWindow::GetDrawConnectedState)
+								.OnCheckStateChanged(this, &SNavGen3DWindow::OnDrawConnectedChanged)
+							]
+						]
+
+						+ SVerticalBox::Slot()
+						.AutoHeight()
+						.Padding(8.0f, 4.0f, 8.0f, 4.0f)
+						[
+							SNew(SHorizontalBox)
+
+							+ SHorizontalBox::Slot()
+							.AutoWidth()
+							.VAlign(VAlign_Center)
+							[
+								SNew(STextBlock)
 								.Text(FText::FromString("Camera Vol:  "))
 								.ColorAndOpacity(TextColor)
 							]
@@ -292,7 +343,7 @@ void SNavGen3DWindow::Construct(const FArguments& InArgs)
 							.VAlign(VAlign_Center)
 							[
 								SNew(STextBlock)
-								.Text(FText::FromString("NavMesh Agent:  "))
+								.Text(FText::FromString("Draw Time:  "))
 								.ColorAndOpacity(TextColor)
 							]
 
@@ -302,10 +353,9 @@ void SNavGen3DWindow::Construct(const FArguments& InArgs)
 							[
 								SNew(SSlider)
 								.MinValue(0.0f)
-								.MaxValue(GetNavMeshAgentSliderMax())
-								.StepSize(1.0f)
-								.Value(this, &SNavGen3DWindow::GetNavMeshAgentSliderValue)
-								.OnValueChanged(this, &SNavGen3DWindow::OnNavMeshAgentSliderChanged)
+								.MaxValue(120.0f)
+								.Value(this, &SNavGen3DWindow::GetDebugDrawTime)
+								.OnValueChanged(this, &SNavGen3DWindow::OnDebugDrawTimeChanged)
 							]
 
 							+ SHorizontalBox::Slot()
@@ -314,9 +364,19 @@ void SNavGen3DWindow::Construct(const FArguments& InArgs)
 							.Padding(8.0f, 0.0f, 0.0f, 0.0f)
 							[
 								SNew(STextBlock)
-								.Text(this, &SNavGen3DWindow::GetNavMeshAgentText)
+								.Text(this, &SNavGen3DWindow::GetDebugDrawTimeText)
 								.ColorAndOpacity(TextColor)
 							]
+						]
+
+						+ SVerticalBox::Slot()
+						.AutoHeight()
+						.Padding(8.0f, 8.0f, 8.0f, 2.0f)
+						[
+							SNew(STextBlock)
+							.Text(this, &SNavGen3DWindow::GetGenerationStatusText)
+							.ColorAndOpacity(FSlateColor(FLinearColor(1.0f, 0.8f, 0.2f)))
+							.Visibility(this, &SNavGen3DWindow::GetGenerationStatusVisibility)
 						]
 
 						+ SVerticalBox::Slot()
@@ -348,27 +408,23 @@ void SNavGen3DWindow::Construct(const FArguments& InArgs)
 								SNew(SButton)
 								.Text(FText::FromString("Reset"))
 								.OnClicked(this, &SNavGen3DWindow::OnResetNavMesh3DClicked)
+								.IsEnabled(this, &SNavGen3DWindow::IsNotPlayMode)
 							]
 
 							+ SUniformGridPanel::Slot(0, 1)
 							[
 								SNew(SButton)
-								.Text(FText::FromString("Validate Embedded Bounds Volumes"))
-								.OnClicked(this, &SNavGen3DWindow::OnValidateEmbeddedBoundsVolumesClicked)
+								.Text(FText::FromString("Generate NavMesh3D"))
+								.OnClicked(this, &SNavGen3DWindow::OnGenerateNavMesh3DForSelectionClicked)
+								.IsEnabled(this, &SNavGen3DWindow::IsGenerationEnabled)
 							]
 
 							+ SUniformGridPanel::Slot(0, 2)
 							[
 								SNew(SButton)
-								.Text(FText::FromString("Generate NavMesh 3D For Selection"))
-								.OnClicked(this, &SNavGen3DWindow::OnGenerateNavMesh3DForSelectionClicked)
-							]
-
-							+ SUniformGridPanel::Slot(0, 3)
-							[
-								SNew(SButton)
 								.Text(FText::FromString("Validate NavMesh3D"))
 								.OnClicked(this, &SNavGen3DWindow::OnValidateNavMesh3DClicked)
+								.IsEnabled(this, &SNavGen3DWindow::IsGenerationEnabled)
 							]
 						]
 
@@ -399,6 +455,48 @@ void SNavGen3DWindow::Construct(const FArguments& InArgs)
 							+ SUniformGridPanel::Slot(0, 0)
 							[
 								SNew(SButton)
+								.Text(FText::FromString("Generate Volumes"))
+								.OnClicked(this, &SNavGen3DWindow::OnGenerateVolumesClicked)
+								.IsEnabled(this, &SNavGen3DWindow::IsGenerationEnabled)
+							]
+
+							+ SUniformGridPanel::Slot(0, 1)
+							[
+								SNew(SButton)
+								.Text(FText::FromString("Find Connections"))
+								.OnClicked(this, &SNavGen3DWindow::OnFindConnectionsClicked)
+								.IsEnabled(this, &SNavGen3DWindow::IsNotPlayMode)
+							]
+						]
+
+						+ SVerticalBox::Slot()
+						.AutoHeight()
+						.Padding(8.0f, 8.0f, 8.0f, 2.0f)
+						[
+							SNew(STextBlock)
+							.Text(FText::FromString("Volume Iteration (Debug)"))
+							.ColorAndOpacity(LabelColor)
+						]
+
+						+ SVerticalBox::Slot()
+						.AutoHeight()
+						.Padding(8.0f, 0.0f, 8.0f, 4.0f)
+						[
+							SNew(SSeparator)
+							.Orientation(Orient_Horizontal)
+						]
+
+						+ SVerticalBox::Slot()
+						.AutoHeight()
+						.Padding(8.0f, 4.0f, 8.0f, 4.0f)
+						[
+							SNew(SUniformGridPanel)
+							.SlotPadding(FMargin(0.0f, 4.0f, 0.0f, 0.0f))
+							.IsEnabled(this, &SNavGen3DWindow::IsGenerationEnabled)
+
+							+ SUniformGridPanel::Slot(0, 0)
+							[
+								SNew(SButton)
 								.Text(FText::FromString("Process Camera Volume"))
 								.OnClicked(this, &SNavGen3DWindow::OnProcessCameraVolumeClicked)
 							]
@@ -413,8 +511,8 @@ void SNavGen3DWindow::Construct(const FArguments& InArgs)
 							+ SUniformGridPanel::Slot(0, 2)
 							[
 								SNew(SButton)
-								.Text(FText::FromString("Find Camera Volume Neighbors"))
-								.OnClicked(this, &SNavGen3DWindow::OnFindCameraVolumeNeighborsClicked)
+								.Text(FText::FromString("Find Camera Volume Connections"))
+								.OnClicked(this, &SNavGen3DWindow::OnFindCameraVolumeConnectionsClicked)
 							]
 						]
 
@@ -717,6 +815,40 @@ void SNavGen3DWindow::OnDrawModeRadioChanged(ECheckBoxState InNewState, ENavGen3
 	}
 }
 
+ECheckBoxState SNavGen3DWindow::GetDrawConnectionsState() const
+{
+	if (const UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
+	{
+		return Subsystem->DebugDrawConnections ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+	}
+	return ECheckBoxState::Unchecked;
+}
+
+void SNavGen3DWindow::OnDrawConnectionsChanged(ECheckBoxState InNewState)
+{
+	if (UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
+	{
+		Subsystem->DebugDrawConnections = (InNewState == ECheckBoxState::Checked);
+	}
+}
+
+ECheckBoxState SNavGen3DWindow::GetDrawConnectedState() const
+{
+	if (const UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
+	{
+		return Subsystem->DrawConnected ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+	}
+	return ECheckBoxState::Unchecked;
+}
+
+void SNavGen3DWindow::OnDrawConnectedChanged(ECheckBoxState InNewState)
+{
+	if (UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
+	{
+		Subsystem->DrawConnected = (InNewState == ECheckBoxState::Checked);
+	}
+}
+
 ECheckBoxState SNavGen3DWindow::GetDrawCameraVolumeState() const
 {
 	if (const UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
@@ -734,14 +866,67 @@ void SNavGen3DWindow::OnDrawCameraVolumeChanged(ECheckBoxState InNewState)
 	}
 }
 
-FReply SNavGen3DWindow::OnValidateEmbeddedBoundsVolumesClicked()
+bool SNavGen3DWindow::HasSelectedBoundsVolume() const
+{
+	if (GEditor)
+	{
+		for (FSelectionIterator It(GEditor->GetSelectedActorIterator()); It; ++It)
+		{
+			if (Cast<ANavGen3DBoundsVolume>(*It))
+			{
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+EVisibility SNavGen3DWindow::GetGenerationStatusVisibility() const
 {
 	if (UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
 	{
-		Subsystem->ValidateEmbeddedBoundsVolumes();
+		if (Subsystem->IsPlayMode() || !HasSelectedBoundsVolume())
+		{
+			return EVisibility::Visible;
+		}
 	}
-	return FReply::Handled();
+	return EVisibility::Collapsed;
 }
+
+FText SNavGen3DWindow::GetGenerationStatusText() const
+{
+	if (UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
+	{
+		if (Subsystem->IsPlayMode())
+		{
+			return FText::FromString("Generation valid at Editor time");
+		}
+		if (!HasSelectedBoundsVolume())
+		{
+			return FText::FromString("Select a Bounds Volume for Generation");
+		}
+	}
+	return FText::GetEmpty();
+}
+
+bool SNavGen3DWindow::IsNotPlayMode() const
+{
+	if (UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
+	{
+		return !Subsystem->IsPlayMode();
+	}
+	return true;
+}
+
+bool SNavGen3DWindow::IsGenerationEnabled() const
+{
+	if (UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
+	{
+		return !Subsystem->IsPlayMode() && HasSelectedBoundsVolume();
+	}
+	return true;
+}
+
 
 FReply SNavGen3DWindow::OnGenerateNavMesh3DForSelectionClicked()
 {
@@ -754,6 +939,34 @@ FReply SNavGen3DWindow::OnGenerateNavMesh3DForSelectionClicked()
 				Volume->GenerateNavMesh3D();
 			}
 		}
+	}
+	return FReply::Handled();
+}
+
+FReply SNavGen3DWindow::OnGenerateVolumesClicked()
+{
+	if (UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
+	{
+		Subsystem->InitializeNavMesh3D();
+		if (GEditor)
+		{
+			for (FSelectionIterator It(GEditor->GetSelectedActorIterator()); It; ++It)
+			{
+				if (ANavGen3DBoundsVolume* Volume = Cast<ANavGen3DBoundsVolume>(*It))
+				{
+					Subsystem->GenerateNavMesh3DFromBoundsVolume(Volume);
+				}
+			}
+		}
+	}
+	return FReply::Handled();
+}
+
+FReply SNavGen3DWindow::OnFindConnectionsClicked()
+{
+	if (UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
+	{
+		Subsystem->GenerateNavMesh3DConnections(Subsystem->DebugNavMeshAgentIndex);
 	}
 	return FReply::Handled();
 }
@@ -832,7 +1045,7 @@ FReply SNavGen3DWindow::OnValidateCameraVolumeClicked()
 	return FReply::Handled();
 }
 
-FReply SNavGen3DWindow::OnFindCameraVolumeNeighborsClicked()
+FReply SNavGen3DWindow::OnFindCameraVolumeConnectionsClicked()
 {
 	if (UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
 	{
@@ -840,12 +1053,18 @@ FReply SNavGen3DWindow::OnFindCameraVolumeNeighborsClicked()
 		NavMeshVolume* Volume = Subsystem->FindVolumeContainingLocation(CameraLocation);
 		if (Volume)
 		{
+			float AgentRadius, AgentHeight;
+			Subsystem->GetAgentSettings(Subsystem->DebugNavMeshAgentIndex, AgentRadius, AgentHeight);
+			const FCollisionShape Capsule = FCollisionShape::MakeCapsule(AgentRadius, AgentHeight * 0.5f);
+			Subsystem->FindNavMeshVolumeConnections(Subsystem->DebugNavMeshAgentIndex, Capsule, *Volume);
 			if (UWorld* World = Subsystem->FindWorld())
 			{
-				const TArray<NavVolumeConnection> Connections = Subsystem->FindNavMeshVolumeConnections(*Volume);
-				for (const NavVolumeConnection& Conn : Connections)
+				if (const TArray<NavVolumeConnection>* Connections = Subsystem->GetVolumeConnections(Subsystem->DebugNavMeshAgentIndex, Volume->ID))
 				{
-					DrawDebugSphere(World, Conn.Location, 15.0f, 8, FColor::Green, false, Subsystem->DebugDrawTime);
+					for (const NavVolumeConnection& Conn : *Connections)
+					{
+						DrawDebugSphere(World, Conn.Location, 15.0f, 8, FColor::Green, false, Subsystem->DebugDrawTime);
+					}
 				}
 			}
 		}

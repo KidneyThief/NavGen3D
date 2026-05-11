@@ -67,7 +67,7 @@ FVector UNavGen3DSubsystem::GetCameraLocation()
 	return FVector::ZeroVector;
 }
 
-bool UNavGen3DSubsystem::GenerateNavMesh3DNeighbors(int32 InAgentIndex)
+bool UNavGen3DSubsystem::GenerateNavMesh3DConnections(int32 InAgentIndex)
 {
 	float AgentRadius, AgentHeight;
 	if (!GetAgentSettings(InAgentIndex, AgentRadius, AgentHeight))
@@ -75,7 +75,38 @@ bool UNavGen3DSubsystem::GenerateNavMesh3DNeighbors(int32 InAgentIndex)
 		return false;
 	}
 
-	return false;
+	const FCollisionShape Capsule = FCollisionShape::MakeCapsule(AgentRadius, AgentHeight * 0.5f);
+
+	NavVolumeConnectionMap.Remove(InAgentIndex);
+
+	for (const auto& Pair : NavMeshSolutionMap)
+	{
+		FindNavMeshVolumeConnections(InAgentIndex, Capsule, Pair.Value);
+
+		TMap<uint64, TArray<NavVolumeConnection>>& AgentMap = NavVolumeConnectionMap.FindOrAdd(InAgentIndex);
+		if (const TArray<NavVolumeConnection>* ConnectionsPtr = AgentMap.Find(Pair.Key))
+		{
+			const TArray<NavVolumeConnection> Connections = *ConnectionsPtr;
+			for (const NavVolumeConnection& Conn : Connections)
+			{
+				TArray<NavVolumeConnection>& NeighborConns = AgentMap.FindOrAdd(Conn.ID);
+				bool bAlreadyMirrored = false;
+				for (const NavVolumeConnection& NC : NeighborConns)
+				{
+					if (NC.ID == Pair.Key) { bAlreadyMirrored = true; break; }
+				}
+				if (!bAlreadyMirrored)
+				{
+					NavVolumeConnection Reverse;
+					Reverse.ID = Pair.Key;
+					Reverse.Location = Conn.Location;
+					NeighborConns.Add(Reverse);
+				}
+			}
+		}
+	}
+
+	return true;
 }
 
 NavMeshVolume* UNavGen3DSubsystem::FindNavMeshVolumeByID(uint64 InID)
@@ -83,12 +114,17 @@ NavMeshVolume* UNavGen3DSubsystem::FindNavMeshVolumeByID(uint64 InID)
 	return NavMeshSolutionMap.Find(InID);
 }
 
-TArray<NavVolumeConnection> UNavGen3DSubsystem::FindNavMeshVolumeConnections(const NavMeshVolume& InSourceVolume)
+void UNavGen3DSubsystem::FindNavMeshVolumeConnections(int32 InAgentIndex, const FCollisionShape& InCapsule, const NavMeshVolume& InSourceVolume)
 {
-	TArray<NavVolumeConnection> Connections;
+	TArray<NavVolumeConnection>& Connections = NavVolumeConnectionMap.FindOrAdd(InAgentIndex).FindOrAdd(InSourceVolume.ID);
+
 	const float Stride = (float)GetDefault<UNavGen3DSettings>()->MaxVolumeSize;
 	const FVector Center = InSourceVolume.Bounds.GetCenter();
 	TSet<uint64> FoundIDs;
+	for (const NavVolumeConnection& Existing : Connections)
+	{
+		FoundIDs.Add(Existing.ID);
+	}
 
 	auto CheckBucket = [&](const TMap<uint64, uint64>& InMap, uint64 InHash, int32 InSortAxis)
 	{
@@ -104,7 +140,7 @@ TArray<NavVolumeConnection> UNavGen3DSubsystem::FindNavMeshVolumeConnections(con
 			if (Curr->ID != InSourceVolume.ID && !FoundIDs.Contains(Curr->ID))
 			{
 				FVector Location;
-				if (FindNavMeshVolumeConnection(InSourceVolume, *Curr, InSortAxis, Location))
+				if (FindNavMeshVolumeConnection(InAgentIndex, InCapsule, InSourceVolume, *Curr, InSortAxis, Location))
 				{
 					FoundIDs.Add(Curr->ID);
 					NavVolumeConnection Conn;
@@ -132,11 +168,18 @@ TArray<NavVolumeConnection> UNavGen3DSubsystem::FindNavMeshVolumeConnections(con
 			CheckBucket(NavMeshVolumeMap_Z, CalculateHash3D(FVector(Center.X + s1 * Stride, Center.Y + s2 * Stride, 0.0f)), 2);
 		}
 	}
-
-	return Connections;
 }
 
-bool UNavGen3DSubsystem::FindNavMeshVolumeConnection(const NavMeshVolume& InSourceVolume, const NavMeshVolume& InNeighborVolume, int32 InAxis, FVector& OutLocation)
+const TArray<NavVolumeConnection>* UNavGen3DSubsystem::GetVolumeConnections(int32 InAgentIndex, uint64 InVolumeID) const
+{
+	if (const TMap<uint64, TArray<NavVolumeConnection>>* AgentMap = NavVolumeConnectionMap.Find(InAgentIndex))
+	{
+		return AgentMap->Find(InVolumeID);
+	}
+	return nullptr;
+}
+
+bool UNavGen3DSubsystem::FindNavMeshVolumeConnection(int32 InAgentIndex, const FCollisionShape& InCapsule, const NavMeshVolume& InSourceVolume, const NavMeshVolume& InNeighborVolume, int32 InAxis, FVector& OutLocation)
 {
 	const FBox& S = InSourceVolume.Bounds;
 	const FBox& N = InNeighborVolume.Bounds;
@@ -162,7 +205,7 @@ bool UNavGen3DSubsystem::FindNavMeshVolumeConnection(const NavMeshVolume& InSour
 		OutLocation[InAxis] = SharedValue;
 		OutLocation[A1]     = (OMin1 + OMax1) * 0.5f;
 		OutLocation[A2]     = (OMin2 + OMax2) * 0.5f;
-		return true;
+		return ValidateConnectionCollision(InCapsule, OutLocation);
 	}
 
 	return false;
@@ -683,6 +726,16 @@ void UNavGen3DSubsystem::RemoveNavMeshVolume(uint64 InID)
 	NavMeshSolutionMap.Remove(InID);
 }
 
+bool UNavGen3DSubsystem::ValidateConnectionCollision(const FCollisionShape& InCapsule, const FVector& InLocation)
+{
+	UWorld* World = FindWorld();
+	if (!World)
+	{
+		return false;
+	}
+	return !World->OverlapBlockingTestByChannel(InLocation, FQuat::Identity, ECC_WorldStatic, InCapsule);
+}
+
 bool UNavGen3DSubsystem::PlaneTrace(FVector InMin, FVector InMax, EAxis::Type InAxis, FVector& OutImpactPoint, bool& OutStartPenetrating)
 {
 	OutStartPenetrating = false;
@@ -750,8 +803,30 @@ bool UNavGen3DSubsystem::GenerateNavMesh3D(NavMeshVolume* InVolume)
 {
 	if (InVolume)
 	{
-		return ProcessNavMeshVolume(*InVolume);
+		ProcessNavMeshVolume(*InVolume);
+
+		if (InVolume->ID != 0)
+		{
+			const int32 AgentCount = GetSupportedAgentCount();
+			for (int32 AgentIndex = 0; AgentIndex < AgentCount; ++AgentIndex)
+			{
+				float AgentRadius, AgentHeight;
+				if (GetAgentSettings(AgentIndex, AgentRadius, AgentHeight))
+				{
+					const FCollisionShape Capsule = FCollisionShape::MakeCapsule(AgentRadius, AgentHeight * 0.5f);
+					if (TMap<uint64, TArray<NavVolumeConnection>>* AgentMap = NavVolumeConnectionMap.Find(AgentIndex))
+					{
+						AgentMap->Remove(InVolume->ID);
+					}
+					FindNavMeshVolumeConnections(AgentIndex, Capsule, *InVolume);
+				}
+			}
+		}
+
+		return false;
 	}
+
+	InitializeNavMesh3D();
 
 	while (!ProcessVolumesList.IsEmpty())
 	{
@@ -770,7 +845,7 @@ void UNavGen3DSubsystem::InitializeNavMesh3D()
 	NavMeshVolumeMap_X.Reset();
 	NavMeshVolumeMap_Y.Reset();
 	NavMeshVolumeMap_Z.Reset();
-	ProcessVolumesList.Reset();
+	NavVolumeConnectionMap.Reset();
 	NavMeshVolumeIDGenerator = 0;
 
 	ValidateEmbeddedBoundsVolumes();
@@ -838,21 +913,42 @@ bool UNavGen3DSubsystem::ValidateNavMesh3D(NavMeshVolume* InVolume)
 		return bAllValid;
 	}
 
+	const FString ActorName = InVolume->ParentBoundsVolume.IsValid()
+		? InVolume->ParentBoundsVolume->GetActorLabel()
+		: TEXT("<unknown>");
+
+	bool bValid = true;
+
 	FVector ImpactPoint;
 	bool bIgnored = false;
 	if (PlaneTrace(InVolume->Bounds.Min, InVolume->Bounds.Max, EAxis::X, ImpactPoint, bIgnored) ||
 		PlaneTrace(InVolume->Bounds.Min, InVolume->Bounds.Max, EAxis::Y, ImpactPoint, bIgnored) ||
 		PlaneTrace(InVolume->Bounds.Min, InVolume->Bounds.Max, EAxis::Z, ImpactPoint, bIgnored))
 	{
-		const FString ActorName = InVolume->ParentBoundsVolume.IsValid()
-			? InVolume->ParentBoundsVolume->GetActorLabel()
-			: TEXT("<unknown>");
 		AddLogMessage(ENavGen3DLogCategory::Warning, ActorName,
 			FString::Printf(TEXT("Validation failed for volume ID %llu"), InVolume->ID));
-		return false;
+		bValid = false;
 	}
 
-	return true;
+	float AgentRadius, AgentHeight;
+	if (GetAgentSettings(DebugNavMeshAgentIndex, AgentRadius, AgentHeight))
+	{
+		const FCollisionShape Capsule = FCollisionShape::MakeCapsule(AgentRadius, AgentHeight * 0.5f);
+		if (const TArray<NavVolumeConnection>* Connections = GetVolumeConnections(DebugNavMeshAgentIndex, InVolume->ID))
+		{
+			for (const NavVolumeConnection& Conn : *Connections)
+			{
+				if (!ValidateConnectionCollision(Capsule, Conn.Location))
+				{
+					AddLogMessage(ENavGen3DLogCategory::Warning, ActorName,
+						FString::Printf(TEXT("Connection validation failed for volume ID %llu, connection to ID %llu"), InVolume->ID, Conn.ID));
+					bValid = false;
+				}
+			}
+		}
+	}
+
+	return bValid;
 }
 
 void UNavGen3DSubsystem::ValidateEmbeddedBoundsVolumes()
@@ -965,11 +1061,33 @@ void UNavGen3DSubsystem::OnEndFrame()
 		{
 			if (World)
 			{
+				const TMap<uint64, TArray<NavVolumeConnection>>* AgentConnections =
+					DebugDrawConnections ? NavVolumeConnectionMap.Find(DebugNavMeshAgentIndex) : nullptr;
+
+				static const TArray<FColor> VolumeColors = {
+					FColor::Red, FColor::Green, FColor::Blue, FColor::Yellow,
+					FColor::Magenta, FColor(255, 128, 0), FColor(0, 255, 128), FColor(128, 0, 255)
+				};
+
 				for (const auto& Pair : NavMeshSolutionMap)
 				{
 					const NavMeshVolume& Volume = Pair.Value;
 					const FVector Center = Volume.Bounds.GetCenter();
-					DrawDebugBox(World, Center, Volume.Bounds.GetExtent(), FColor::Cyan, false, DrawTime, 0, 3.0f);
+					const FColor BoxColor = DrawConnected
+						? FColor::Cyan
+						: VolumeColors[Volume.ID % VolumeColors.Num()];
+					DrawDebugBox(World, Center, Volume.Bounds.GetExtent(), BoxColor, false, DrawTime, 0, 3.0f);
+
+					if (AgentConnections)
+					{
+						if (const TArray<NavVolumeConnection>* Connections = AgentConnections->Find(Volume.ID))
+						{
+							for (const NavVolumeConnection& Conn : *Connections)
+							{
+								DrawDebugSphere(World, Conn.Location, 5.0f, 9, FColor::Orange, false, DrawTime);
+							}
+						}
+					}
 				}
 			}
 			break;
@@ -998,6 +1116,17 @@ void UNavGen3DSubsystem::OnEndFrame()
 		if (NavMeshVolume* Volume = FindVolumeContainingLocation(CameraLocation))
 		{
 			DrawDebugBox(World, Volume->Bounds.GetCenter(), Volume->Bounds.GetExtent(), FColor::Green, false, DrawTime, 0, 5.0f);
+
+			if (const TMap<uint64, TArray<NavVolumeConnection>>* AgentConnections = NavVolumeConnectionMap.Find(DebugNavMeshAgentIndex))
+			{
+				if (const TArray<NavVolumeConnection>* Connections = AgentConnections->Find(Volume->ID))
+				{
+					for (const NavVolumeConnection& Conn : *Connections)
+					{
+						DrawDebugSphere(World, Conn.Location, 5.0f, 9, FColor::Orange, false, DrawTime);
+					}
+				}
+			}
 		}
 		else
 		{

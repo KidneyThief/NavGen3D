@@ -40,6 +40,7 @@ public:
 	bool GenerateNavMesh3DFromBoundsVolume(ANavGen3DBoundsVolume* InVolume);
 	bool GenerateNavMesh3D(NavMeshVolume* InVolume = nullptr);
 	bool PlaneTrace(FVector InMin, FVector InMax, EAxis::Type InAxis, FVector& OutImpactPoint, bool& OutStartPenetrating);
+	bool ValidateConnectionCollision(const FCollisionShape& InCapsule, const FVector& InLocation);
 	bool AddNavMeshVolume(NavMeshVolume& RefVolume);
 	void RemoveNavMeshVolume(uint64 InID);
 	bool ProcessNavMeshVolume(NavMeshVolume& RefVolume, bool InDrawDebug = false);
@@ -52,10 +53,11 @@ public:
 	FVector GetCameraLocation();
 	bool GetAgentSettings(int32 InIndex, float& OutRadius, float& OutHeight) const;
 	int32 GetSupportedAgentCount() const;
-	bool GenerateNavMesh3DNeighbors(int32 InAgentIndex);
+	bool GenerateNavMesh3DConnections(int32 InAgentIndex);
 	NavMeshVolume* FindNavMeshVolumeByID(uint64 InID);
-	TArray<NavVolumeConnection> FindNavMeshVolumeConnections(const NavMeshVolume& InSourceVolume);
-	bool FindNavMeshVolumeConnection(const NavMeshVolume& InSourceVolume, const NavMeshVolume& InNeighborVolume, int32 InAxis, FVector& OutLocation);
+	void FindNavMeshVolumeConnections(int32 InAgentIndex, const FCollisionShape& InCapsule, const NavMeshVolume& InSourceVolume);
+	bool FindNavMeshVolumeConnection(int32 InAgentIndex, const FCollisionShape& InCapsule, const NavMeshVolume& InSourceVolume, const NavMeshVolume& InNeighborVolume, int32 InAxis, FVector& OutLocation);
+	const TArray<NavVolumeConnection>* GetVolumeConnections(int32 InAgentIndex, uint64 InVolumeID) const;
 
 	static inline FString FVectorToString(const FVector& InVec)
 	{
@@ -73,6 +75,12 @@ public:
 
 	UPROPERTY()
 	bool DrawCameraVolume = false;
+
+	UPROPERTY()
+	bool DebugDrawConnections = false;
+
+	UPROPERTY()
+	bool DrawConnected = false;
 
 	UPROPERTY()
 	float DebugDrawTime = 0.0f;
@@ -99,5 +107,5 @@ private:
 	TMap<uint64, uint64> NavMeshVolumeMap_X;
 	TMap<uint64, uint64> NavMeshVolumeMap_Y;
 	TMap<uint64, uint64> NavMeshVolumeMap_Z;
-	TMap<int32, TMap<uint64, NavVolumeConnection>> NavVolumeConnectionMap;
+	TMap<int32, TMap<uint64, TArray<NavVolumeConnection>>> NavVolumeConnectionMap;
 };

@@ -45,7 +45,13 @@ void ANavGen3DBoundsVolume::GenerateNavMesh3D()
 {
 	if (UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
 	{
-		bool bSuccess = Subsystem->GenerateNavMesh3DFromBoundsVolume(this);
+		Subsystem->InitializeNavMesh3D();
+		Subsystem->GenerateNavMesh3DFromBoundsVolume(this);
+		const int32 AgentCount = Subsystem->GetSupportedAgentCount();
+		for (int32 AgentIndex = 0; AgentIndex < AgentCount; ++AgentIndex)
+		{
+			Subsystem->GenerateNavMesh3DConnections(AgentIndex);
+		}
 	}
 }
 
