@@ -52,6 +52,7 @@ void ANavGen3DBoundsVolume::GenerateNavMesh3D()
 		{
 			Subsystem->GenerateNavMesh3DConnections(AgentIndex);
 		}
+		Subsystem->PruneNavMesh3D();
 	}
 }
 

@@ -29,6 +29,8 @@ private:
 	void OnDrawConnectedChanged(ECheckBoxState InNewState);
 	ECheckBoxState GetDrawCameraVolumeState() const;
 	void OnDrawCameraVolumeChanged(ECheckBoxState InNewState);
+	void OnVolumeIDTextChanged(const FText& InText);
+	void OnVolumeIDTextCommitted(const FText& InText, ETextCommit::Type InCommitType);
 	float GetNavMeshAgentSliderValue() const;
 	float GetNavMeshAgentSliderMax() const;
 	void OnNavMeshAgentSliderChanged(float InNewValue);
@@ -66,6 +68,7 @@ private:
 	TSharedRef<ITableRow> GenerateLogRow(TSharedPtr<FNavGen3DLogEntry> InItem, const TSharedRef<STableViewBase>& InOwnerTable);
 
 	bool bLogPanelVisible = true;
+	FString VolumeIDText;
 	float CachedExpandedWindowWidth = 620.0f;
 	TArray<TSharedPtr<FNavGen3DLogEntry>> LogEntries;
 	TArray<TSharedPtr<FNavGen3DLogEntry>> FilteredLogEntries;

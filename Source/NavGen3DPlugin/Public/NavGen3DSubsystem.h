@@ -46,6 +46,7 @@ public:
 	bool ProcessNavMeshVolume(NavMeshVolume& RefVolume, bool InDrawDebug = false);
 	void ValidateEmbeddedBoundsVolumes();
 	bool ValidateNavMesh3D(NavMeshVolume* InVolume = nullptr);
+	void PruneNavMesh3D();
 	void SetNavGen3DWindow(TSharedPtr<SNavGen3DWindow> InWindow);
 	void AddLogMessage(ENavGen3DLogCategory InCategory, const FString& InActorName, const FString& InMessage);
 
@@ -81,6 +82,8 @@ public:
 
 	UPROPERTY()
 	bool DrawConnected = false;
+
+	uint64 DrawVolumeID = 0;
 
 	UPROPERTY()
 	float DebugDrawTime = 0.0f;

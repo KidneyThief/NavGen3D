@@ -285,6 +285,12 @@ uint64 UNavGen3DSubsystem::CalculateHash3D(const FVector& InVec) const
 
 bool UNavGen3DSubsystem::AddNavMeshVolume(NavMeshVolume& RefVolume)
 {
+	for (int32 i = 0; i < 3; ++i)
+	{
+		RefVolume.Bounds.Min[i] = FMath::FloorToFloat(RefVolume.Bounds.Min[i] / Epsilon) * Epsilon;
+		RefVolume.Bounds.Max[i] = FMath::FloorToFloat(RefVolume.Bounds.Max[i] / Epsilon) * Epsilon;
+	}
+
 	const FVector Size = RefVolume.Bounds.GetSize();
 	if (Size.X < Epsilon || Size.Y < Epsilon || Size.Z < Epsilon)
 	{
@@ -324,6 +330,70 @@ bool UNavGen3DSubsystem::AddNavMeshVolume(NavMeshVolume& RefVolume)
 		}
 
 		return AddNavMeshVolume(Half1) && AddNavMeshVolume(Half2);
+	}
+
+	// Check for merge with an existing adjacent volume that shares an exact face
+	{
+		const FVector Center = RefVolume.Bounds.GetCenter();
+		const float MaxVolumeSize_f = (float)Settings->MaxVolumeSize;
+
+		auto CheckAxisMerge = [&](const TMap<uint64, uint64>& InMap, uint64 InHash, int32 InAxis) -> bool
+		{
+			const uint64* HeadID = InMap.Find(InHash);
+			if (!HeadID || *HeadID == 0) return false;
+
+			const int32 A1 = (InAxis + 1) % 3;
+			const int32 A2 = (InAxis + 2) % 3;
+
+			uint64 CurrID = *HeadID;
+			while (CurrID != 0)
+			{
+				const NavMeshVolume* Curr = NavMeshSolutionMap.Find(CurrID);
+				if (!Curr) break;
+
+				if (FMath::IsNearlyEqual(Curr->Bounds.Min[A1], RefVolume.Bounds.Min[A1], Epsilon) &&
+					FMath::IsNearlyEqual(Curr->Bounds.Max[A1], RefVolume.Bounds.Max[A1], Epsilon) &&
+					FMath::IsNearlyEqual(Curr->Bounds.Min[A2], RefVolume.Bounds.Min[A2], Epsilon) &&
+					FMath::IsNearlyEqual(Curr->Bounds.Max[A2], RefVolume.Bounds.Max[A2], Epsilon))
+				{
+					const bool bSharesFace =
+						FMath::IsNearlyEqual(Curr->Bounds.Max[InAxis], RefVolume.Bounds.Min[InAxis], Epsilon) ||
+						FMath::IsNearlyEqual(Curr->Bounds.Min[InAxis], RefVolume.Bounds.Max[InAxis], Epsilon);
+
+					if (bSharesFace)
+					{
+						const float MergedSize = Curr->Bounds.GetSize()[InAxis] + RefVolume.Bounds.GetSize()[InAxis];
+						if (MergedSize <= MaxVolumeSize_f + Epsilon)
+						{
+							NavMeshVolume Merged;
+							Merged.Bounds.Min = RefVolume.Bounds.Min;
+							Merged.Bounds.Max = RefVolume.Bounds.Max;
+							Merged.ParentBoundsVolume = RefVolume.ParentBoundsVolume.IsValid()
+								? RefVolume.ParentBoundsVolume : Curr->ParentBoundsVolume;
+							Merged.Bounds.Min[InAxis] = FMath::Min(Curr->Bounds.Min[InAxis], RefVolume.Bounds.Min[InAxis]);
+							Merged.Bounds.Max[InAxis] = FMath::Max(Curr->Bounds.Max[InAxis], RefVolume.Bounds.Max[InAxis]);
+
+							const uint64 ExistingID = Curr->ID;
+							RemoveNavMeshVolume(ExistingID);
+							return AddNavMeshVolume(Merged);
+						}
+					}
+				}
+
+				switch (InAxis)
+				{
+					case 0: CurrID = Curr->Next_X; break;
+					case 1: CurrID = Curr->Next_Y; break;
+					case 2: CurrID = Curr->Next_Z; break;
+					default: CurrID = 0; break;
+				}
+			}
+			return false;
+		};
+
+		if (CheckAxisMerge(NavMeshVolumeMap_X, CalculateHash3D(FVector(0.0f, Center.Y, Center.Z)), 0)) return true;
+		if (CheckAxisMerge(NavMeshVolumeMap_Y, CalculateHash3D(FVector(Center.X, 0.0f, Center.Z)), 1)) return true;
+		if (CheckAxisMerge(NavMeshVolumeMap_Z, CalculateHash3D(FVector(Center.X, Center.Y, 0.0f)), 2)) return true;
 	}
 
 	RefVolume.ID = ++NavMeshVolumeIDGenerator;
@@ -713,7 +783,12 @@ void UNavGen3DSubsystem::RemoveNavMeshVolume(uint64 InID)
 {
 	if (NavMeshVolume* Volume = NavMeshSolutionMap.Find(InID))
 	{
-		const uint64 LocationHash = CalculateHash3D(Volume->Bounds.GetCenter());
+		const FVector Center = Volume->Bounds.GetCenter();
+		const uint64 NextX = Volume->Next_X;
+		const uint64 NextY = Volume->Next_Y;
+		const uint64 NextZ = Volume->Next_Z;
+
+		const uint64 LocationHash = CalculateHash3D(Center);
 		if (TArray<uint64>* VolumeIDs = NavMeshSolutionMapByLocation.Find(LocationHash))
 		{
 			VolumeIDs->Remove(InID);
@@ -722,7 +797,44 @@ void UNavGen3DSubsystem::RemoveNavMeshVolume(uint64 InID)
 				NavMeshSolutionMapByLocation.Remove(LocationHash);
 			}
 		}
+
+		auto RemoveFromAxisList = [&](TMap<uint64, uint64>& InMap, uint64 InHash, int32 InAxis, uint64 InNextID)
+		{
+			uint64* HeadID = InMap.Find(InHash);
+			if (!HeadID) return;
+			if (*HeadID == InID) { *HeadID = InNextID; return; }
+			uint64 CurrID = *HeadID;
+			while (CurrID != 0)
+			{
+				NavMeshVolume* Curr = NavMeshSolutionMap.Find(CurrID);
+				if (!Curr) break;
+				uint64 CurrNext;
+				switch (InAxis)
+				{
+					case 0: CurrNext = Curr->Next_X; break;
+					case 1: CurrNext = Curr->Next_Y; break;
+					case 2: CurrNext = Curr->Next_Z; break;
+					default: return;
+				}
+				if (CurrNext == InID)
+				{
+					switch (InAxis)
+					{
+						case 0: Curr->Next_X = InNextID; break;
+						case 1: Curr->Next_Y = InNextID; break;
+						case 2: Curr->Next_Z = InNextID; break;
+					}
+					return;
+				}
+				CurrID = CurrNext;
+			}
+		};
+
+		RemoveFromAxisList(NavMeshVolumeMap_X, CalculateHash3D(FVector(0.0f, Center.Y, Center.Z)), 0, NextX);
+		RemoveFromAxisList(NavMeshVolumeMap_Y, CalculateHash3D(FVector(Center.X, 0.0f, Center.Z)), 1, NextY);
+		RemoveFromAxisList(NavMeshVolumeMap_Z, CalculateHash3D(FVector(Center.X, Center.Y, 0.0f)), 2, NextZ);
 	}
+
 	NavMeshSolutionMap.Remove(InID);
 }
 
@@ -951,6 +1063,40 @@ bool UNavGen3DSubsystem::ValidateNavMesh3D(NavMeshVolume* InVolume)
 	return bValid;
 }
 
+void UNavGen3DSubsystem::PruneNavMesh3D()
+{
+	TArray<uint64> VolumesToRemove;
+
+	for (const auto& Pair : NavMeshSolutionMap)
+	{
+		const uint64 VolumeID = Pair.Key;
+		bool bHasConnections = false;
+
+		for (const auto& AgentPair : NavVolumeConnectionMap)
+		{
+			const TArray<NavVolumeConnection>* Connections = AgentPair.Value.Find(VolumeID);
+			if (Connections && Connections->Num() > 0)
+			{
+				bHasConnections = true;
+				break;
+			}
+		}
+
+		if (!bHasConnections)
+		{
+			VolumesToRemove.Add(VolumeID);
+		}
+	}
+
+	for (uint64 ID : VolumesToRemove)
+	{
+		RemoveNavMeshVolume(ID);
+	}
+
+	AddLogMessage(ENavGen3DLogCategory::Info, TEXT(""),
+		FString::Printf(TEXT("Pruned %d disconnected volumes"), VolumesToRemove.Num()));
+}
+
 void UNavGen3DSubsystem::ValidateEmbeddedBoundsVolumes()
 {
 	if (IsPlayMode())
@@ -1107,6 +1253,25 @@ void UNavGen3DSubsystem::OnEndFrame()
 
 		default:
 			break;
+	}
+
+	if (DrawVolumeID != 0 && World)
+	{
+		if (NavMeshVolume* Volume = FindNavMeshVolumeByID(DrawVolumeID))
+		{
+			DrawDebugBox(World, Volume->Bounds.GetCenter(), Volume->Bounds.GetExtent(), FColor::White, false, DrawTime, 0, 5.0f);
+
+			if (const TMap<uint64, TArray<NavVolumeConnection>>* AgentConnections = NavVolumeConnectionMap.Find(DebugNavMeshAgentIndex))
+			{
+				if (const TArray<NavVolumeConnection>* Connections = AgentConnections->Find(Volume->ID))
+				{
+					for (const NavVolumeConnection& Conn : *Connections)
+					{
+						DrawDebugSphere(World, Conn.Location, 5.0f, 9, FColor::Orange, false, DrawTime);
+					}
+				}
+			}
+		}
 	}
 
 	if (DrawCameraVolume && World)

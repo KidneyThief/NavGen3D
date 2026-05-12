@@ -8,6 +8,7 @@
 #include "Selection.h"
 #include "DrawDebugHelpers.h"
 #include "Widgets/Input/SCheckBox.h"
+#include "Widgets/Input/SEditableTextBox.h"
 #include "Widgets/Input/SSlider.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SSearchBox.h"
@@ -329,6 +330,31 @@ void SNavGen3DWindow::Construct(const FArguments& InArgs)
 								SNew(SCheckBox)
 								.IsChecked(this, &SNavGen3DWindow::GetDrawCameraVolumeState)
 								.OnCheckStateChanged(this, &SNavGen3DWindow::OnDrawCameraVolumeChanged)
+							]
+						]
+
+						+ SVerticalBox::Slot()
+						.AutoHeight()
+						.Padding(8.0f, 4.0f, 8.0f, 4.0f)
+						[
+							SNew(SHorizontalBox)
+
+							+ SHorizontalBox::Slot()
+							.AutoWidth()
+							.VAlign(VAlign_Center)
+							[
+								SNew(STextBlock)
+								.Text(FText::FromString("Draw Volume By ID:  "))
+								.ColorAndOpacity(TextColor)
+							]
+
+							+ SHorizontalBox::Slot()
+							.FillWidth(1.0f)
+							.VAlign(VAlign_Center)
+							[
+								SNew(SEditableTextBox)
+								.OnTextChanged(this, &SNavGen3DWindow::OnVolumeIDTextChanged)
+								.OnTextCommitted(this, &SNavGen3DWindow::OnVolumeIDTextCommitted)
 							]
 						]
 
@@ -863,6 +889,22 @@ void SNavGen3DWindow::OnDrawCameraVolumeChanged(ECheckBoxState InNewState)
 	if (UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
 	{
 		Subsystem->DrawCameraVolume = (InNewState == ECheckBoxState::Checked);
+	}
+}
+
+void SNavGen3DWindow::OnVolumeIDTextChanged(const FText& InText)
+{
+	VolumeIDText = InText.ToString();
+}
+
+void SNavGen3DWindow::OnVolumeIDTextCommitted(const FText& InText, ETextCommit::Type InCommitType)
+{
+	if (InCommitType == ETextCommit::OnEnter)
+	{
+		if (UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
+		{
+			Subsystem->DrawVolumeID = FCString::Strtoui64(*VolumeIDText, nullptr, 10);
+		}
 	}
 }
 
