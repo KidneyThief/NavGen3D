@@ -546,6 +546,55 @@ void SNavGen3DWindow::Construct(const FArguments& InArgs)
 
 					+ SVerticalBox::Slot()
 					.AutoHeight()
+					.Padding(8.0f, 8.0f, 8.0f, 2.0f)
+					[
+						SNew(STextBlock)
+						.Text(FText::FromString("Path Finding"))
+						.ColorAndOpacity(LabelColor)
+					]
+
+					+ SVerticalBox::Slot()
+					.AutoHeight()
+					.Padding(8.0f, 0.0f, 8.0f, 4.0f)
+					[
+						SNew(SSeparator)
+						.Orientation(Orient_Horizontal)
+					]
+
+					+ SVerticalBox::Slot()
+					.AutoHeight()
+					.Padding(8.0f, 4.0f, 8.0f, 2.0f)
+					[
+						SNew(STextBlock)
+						.Text(FText::FromString("Set the Path Origin"))
+						.ColorAndOpacity(FSlateColor(FLinearColor(1.0f, 0.8f, 0.2f)))
+						.Visibility(this, &SNavGen3DWindow::GetPathOriginStatusVisibility)
+					]
+
+					+ SVerticalBox::Slot()
+					.AutoHeight()
+					.Padding(8.0f, 4.0f, 8.0f, 4.0f)
+					[
+						SNew(SUniformGridPanel)
+						.SlotPadding(FMargin(0.0f, 4.0f, 0.0f, 0.0f))
+
+						+ SUniformGridPanel::Slot(0, 0)
+						[
+							SNew(SButton)
+							.Text(FText::FromString("Set PathOrigin"))
+							.OnClicked(this, &SNavGen3DWindow::OnSetPathOriginClicked)
+						]
+
+						+ SUniformGridPanel::Slot(0, 1)
+						[
+							SNew(SButton)
+							.Text(FText::FromString("Path To Camera"))
+							.OnClicked(this, &SNavGen3DWindow::OnPathToCameraClicked)
+						]
+					]
+
+					+ SVerticalBox::Slot()
+					.AutoHeight()
 					[
 						SNew(SVerticalBox)
 
@@ -1009,6 +1058,33 @@ FReply SNavGen3DWindow::OnFindConnectionsClicked()
 	if (UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
 	{
 		Subsystem->GenerateNavMesh3DConnections(Subsystem->DebugNavMeshAgentIndex);
+	}
+	return FReply::Handled();
+}
+
+EVisibility SNavGen3DWindow::GetPathOriginStatusVisibility() const
+{
+	if (const UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
+	{
+		return Subsystem->DebugPathOrigin == FVector(FLT_MAX) ? EVisibility::Visible : EVisibility::Collapsed;
+	}
+	return EVisibility::Visible;
+}
+
+FReply SNavGen3DWindow::OnSetPathOriginClicked()
+{
+	if (UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
+	{
+		Subsystem->DebugPathOrigin = Subsystem->GetCameraLocation();
+	}
+	return FReply::Handled();
+}
+
+FReply SNavGen3DWindow::OnPathToCameraClicked()
+{
+	if (UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
+	{
+		Subsystem->DebugPathToCamera();
 	}
 	return FReply::Handled();
 }

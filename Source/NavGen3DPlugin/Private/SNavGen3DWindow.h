@@ -31,6 +31,9 @@ private:
 	void OnDrawCameraVolumeChanged(ECheckBoxState InNewState);
 	void OnVolumeIDTextChanged(const FText& InText);
 	void OnVolumeIDTextCommitted(const FText& InText, ETextCommit::Type InCommitType);
+	EVisibility GetPathOriginStatusVisibility() const;
+	FReply OnSetPathOriginClicked();
+	FReply OnPathToCameraClicked();
 	float GetNavMeshAgentSliderValue() const;
 	float GetNavMeshAgentSliderMax() const;
 	void OnNavMeshAgentSliderChanged(float InNewValue);

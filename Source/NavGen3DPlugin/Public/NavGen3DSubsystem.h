@@ -21,6 +21,50 @@ enum class ENavGen3DDrawMode : uint8
 };
 
 class SNavGen3DWindow;
+class UNavGen3DSubsystem;
+
+enum class EPathSearchStatus : uint8
+{
+	None        = 0,
+	Initialized = 1,
+	InProgress  = 2,
+	Success     = 3,
+	Fail        = 4,
+};
+
+struct FPathSearchNode
+{
+	uint64 VolumeID = 0;
+	float DistFromSource = 0.0f;
+	float EstDistToTarget = 0.0f;
+	FPathSearchNode* PrevSearchSpace = nullptr;
+};
+
+struct FPathSearchSpace
+{
+	int32 AgentIndex = -1;
+	uint64 OriginID = 0;
+	uint64 DestinationID = 0;
+	FVector Origin = FVector::ZeroVector;
+	FVector Destination = FVector::ZeroVector;
+	TArray<FVector> PathSolution;
+	TArray<FPathSearchNode> NodeHeap;
+	EPathSearchStatus Status = EPathSearchStatus::None;
+
+	void Reset()
+	{
+		AgentIndex = -1;
+		OriginID = 0;
+		DestinationID = 0;
+		Origin = FVector(FLT_MAX);
+		Destination = FVector(FLT_MAX);
+		PathSolution.Reset();
+		NodeHeap.Reset();
+		Status = EPathSearchStatus::None;
+	}
+	void Initialize(UNavGen3DSubsystem* InSubsystem, int32 InAgentIndex, const FVector& PathOrigin, const FVector& PathDestination);
+	void DrawPath(float InDrawTime) const;
+};
 
 UCLASS()
 class NAVGEN3DPLUGIN_API UNavGen3DSubsystem : public UEngineSubsystem
@@ -68,6 +112,10 @@ public:
 	int32 GetSolutionVolumesCount() const { return NavMeshSolutionMap.Num(); }
 	uint64 CalculateHash3D(const FVector& InVec) const;
 	NavMeshVolume* FindVolumeContainingLocation(const FVector& InLocation);
+	NavMeshVolume* FindClosestVolumeContainingLocation(int32 InAgentIndex, const FVector& InLocation);
+	bool PathFind(FPathSearchSpace& InSearchSpace);
+	void FindPathPostProcess(FPathSearchSpace& InSearchSpace);
+	void DebugPathToCamera();
 	TOptional<NavMeshVolume> FindGenerationVolumeContainingLocation(const FVector& InLocation, bool InRemoveFromProcessing);
 	TOptional<NavMeshVolume> FindClosestGenerationVolume(const FVector& InLocation, bool InRemoveFromProcessing);
 
@@ -93,6 +141,14 @@ public:
 
 	UPROPERTY()
 	float Epsilon = 0.1f;
+
+	UPROPERTY()
+	FVector DebugPathOrigin = FVector(FLT_MAX);
+
+	UPROPERTY()
+	FVector DebugPathDestination = FVector(FLT_MAX);
+
+	FPathSearchSpace DebugPathSearchSpace;
 
 	UPROPERTY()
 	TArray<TObjectPtr<ANavGen3DBoundsVolume>> BoundsVolumes;
