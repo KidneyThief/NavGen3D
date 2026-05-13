@@ -8,7 +8,6 @@
 #include "NavGen3DBoundsVolume.h"
 #include "NavGen3DLog.h"
 #include "NavMeshVolume.h"
-#include "NavVolumeConnection.h"
 #include "NavGen3DSubsystem.generated.h"
 
 UENUM()
@@ -48,20 +47,13 @@ struct FPathSearchSpace
 	FVector Origin = FVector::ZeroVector;
 	FVector Destination = FVector::ZeroVector;
 	TArray<FVector> PathSolution;
+	TArray<uint64> PathVolumeIDs;
+	TArray<int32> PathConnectionAxes;
+	TArray<bool> bIsIntermediate;
 	TArray<FPathSearchNode> NodeHeap;
 	EPathSearchStatus Status = EPathSearchStatus::None;
 
-	void Reset()
-	{
-		AgentIndex = -1;
-		OriginID = 0;
-		DestinationID = 0;
-		Origin = FVector(FLT_MAX);
-		Destination = FVector(FLT_MAX);
-		PathSolution.Reset();
-		NodeHeap.Reset();
-		Status = EPathSearchStatus::None;
-	}
+	void Reset();
 	void Initialize(UNavGen3DSubsystem* InSubsystem, int32 InAgentIndex, const FVector& PathOrigin, const FVector& PathDestination);
 	void DrawPath(float InDrawTime) const;
 };
@@ -84,7 +76,7 @@ public:
 	bool GenerateNavMesh3DFromBoundsVolume(ANavGen3DBoundsVolume* InVolume);
 	bool GenerateNavMesh3D(NavMeshVolume* InVolume = nullptr);
 	bool PlaneTrace(FVector InMin, FVector InMax, EAxis::Type InAxis, FVector& OutImpactPoint, bool& OutStartPenetrating);
-	bool ValidateConnectionCollision(const FCollisionShape& InCapsule, const FVector& InLocation);
+	bool ValidateConnectionCollision(const FCollisionShape& InSphere, const FVector& InStart, const FVector& InEnd);
 	bool AddNavMeshVolume(NavMeshVolume& RefVolume);
 	void RemoveNavMeshVolume(uint64 InID);
 	bool ProcessNavMeshVolume(NavMeshVolume& RefVolume, bool InDrawDebug = false);
@@ -97,17 +89,19 @@ public:
 	bool IsPlayMode();
 	FVector GetCameraLocation();
 	bool GetAgentSettings(int32 InIndex, float& OutRadius, float& OutHeight) const;
+	float GetAgentCollisionRadius(int32 InAgentIndex, bool bPadded) const;
 	int32 GetSupportedAgentCount() const;
 	bool GenerateNavMesh3DConnections(int32 InAgentIndex);
 	NavMeshVolume* FindNavMeshVolumeByID(uint64 InID);
-	void FindNavMeshVolumeConnections(int32 InAgentIndex, const FCollisionShape& InCapsule, const NavMeshVolume& InSourceVolume);
-	bool FindNavMeshVolumeConnection(int32 InAgentIndex, const FCollisionShape& InCapsule, const NavMeshVolume& InSourceVolume, const NavMeshVolume& InNeighborVolume, int32 InAxis, FVector& OutLocation);
+	void FindNavMeshVolumeConnections(int32 InAgentIndex, const FCollisionShape& InSphere, const NavMeshVolume& InSourceVolume);
+	bool FindNavMeshVolumeConnection(int32 InAgentIndex, const FCollisionShape& InSphere, const NavMeshVolume& InSourceVolume, const NavMeshVolume& InNeighborVolume, int32 InAxis, FVector& OutLocation, int32& OutConnectionAxis);
 	const TArray<NavVolumeConnection>* GetVolumeConnections(int32 InAgentIndex, uint64 InVolumeID) const;
 
 	static inline FString FVectorToString(const FVector& InVec)
 	{
 		return FString::Printf(TEXT("%.2f, %.2f, %.2f"), InVec.X, InVec.Y, InVec.Z);
 	}
+	inline static FVector InvalidLocation = FVector(FLT_MAX);
 	int32 GetProcessVolumesCount() const { return ProcessVolumesList.Num(); }
 	int32 GetSolutionVolumesCount() const { return NavMeshSolutionMap.Num(); }
 	uint64 CalculateHash3D(const FVector& InVec) const;
@@ -115,7 +109,8 @@ public:
 	NavMeshVolume* FindClosestVolumeContainingLocation(int32 InAgentIndex, const FVector& InLocation);
 	bool PathFind(FPathSearchSpace& InSearchSpace);
 	void FindPathPostProcess(FPathSearchSpace& InSearchSpace);
-	void DebugPathToCamera();
+	void DebugFindPath(FVector InOrigin = InvalidLocation, FVector InDestination = InvalidLocation);
+	bool DebugValidatePath(const FPathSearchSpace& InSearchSpace);
 	TOptional<NavMeshVolume> FindGenerationVolumeContainingLocation(const FVector& InLocation, bool InRemoveFromProcessing);
 	TOptional<NavMeshVolume> FindClosestGenerationVolume(const FVector& InLocation, bool InRemoveFromProcessing);
 
@@ -131,6 +126,17 @@ public:
 	UPROPERTY()
 	bool DrawConnected = false;
 
+	UPROPERTY()
+	bool PathSmoothingEnabled = false;
+
+	UPROPERTY()
+	bool DebugRepathContinuous = false;
+
+	UPROPERTY()
+	float DebugRepathFrequency = 1.0f;
+
+	float DebugRepathTimer = 0.0f;
+
 	uint64 DrawVolumeID = 0;
 
 	UPROPERTY()
@@ -143,10 +149,10 @@ public:
 	float Epsilon = 0.1f;
 
 	UPROPERTY()
-	FVector DebugPathOrigin = FVector(FLT_MAX);
+	FVector DebugPathOrigin = InvalidLocation;
 
 	UPROPERTY()
-	FVector DebugPathDestination = FVector(FLT_MAX);
+	FVector DebugPathDestination = InvalidLocation;
 
 	FPathSearchSpace DebugPathSearchSpace;
 

@@ -15,3 +15,10 @@ struct NavMeshVolume
 	uint64 Next_Y = 0;
 	uint64 Next_Z = 0;
 };
+
+struct NavVolumeConnection
+{
+	uint64 ID = 0;
+	FVector Location = FVector::ZeroVector;
+	int32 ConnectionAxis = 0;
+};

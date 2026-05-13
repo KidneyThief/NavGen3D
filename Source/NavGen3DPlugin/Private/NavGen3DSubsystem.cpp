@@ -51,7 +51,7 @@ FVector UNavGen3DSubsystem::GetCameraLocation()
 				}
 			}
 		}
-		return FVector(FLT_MAX);
+		return InvalidLocation;
 	}
 
 	if (UWorld* World = FindWorld())
@@ -69,19 +69,13 @@ FVector UNavGen3DSubsystem::GetCameraLocation()
 
 bool UNavGen3DSubsystem::GenerateNavMesh3DConnections(int32 InAgentIndex)
 {
-	float AgentRadius, AgentHeight;
-	if (!GetAgentSettings(InAgentIndex, AgentRadius, AgentHeight))
-	{
-		return false;
-	}
-
-	const FCollisionShape Capsule = FCollisionShape::MakeCapsule(AgentRadius, AgentHeight * 0.5f);
+	const FCollisionShape Sphere = FCollisionShape::MakeSphere(GetAgentCollisionRadius(InAgentIndex, true));
 
 	NavVolumeConnectionMap.Remove(InAgentIndex);
 
 	for (const auto& Pair : NavMeshSolutionMap)
 	{
-		FindNavMeshVolumeConnections(InAgentIndex, Capsule, Pair.Value);
+		FindNavMeshVolumeConnections(InAgentIndex, Sphere, Pair.Value);
 
 		TMap<uint64, TArray<NavVolumeConnection>>& AgentMap = NavVolumeConnectionMap.FindOrAdd(InAgentIndex);
 		if (const TArray<NavVolumeConnection>* ConnectionsPtr = AgentMap.Find(Pair.Key))
@@ -100,6 +94,7 @@ bool UNavGen3DSubsystem::GenerateNavMesh3DConnections(int32 InAgentIndex)
 					NavVolumeConnection Reverse;
 					Reverse.ID = Pair.Key;
 					Reverse.Location = Conn.Location;
+					Reverse.ConnectionAxis = -Conn.ConnectionAxis;
 					NeighborConns.Add(Reverse);
 				}
 			}
@@ -114,7 +109,7 @@ NavMeshVolume* UNavGen3DSubsystem::FindNavMeshVolumeByID(uint64 InID)
 	return NavMeshSolutionMap.Find(InID);
 }
 
-void UNavGen3DSubsystem::FindNavMeshVolumeConnections(int32 InAgentIndex, const FCollisionShape& InCapsule, const NavMeshVolume& InSourceVolume)
+void UNavGen3DSubsystem::FindNavMeshVolumeConnections(int32 InAgentIndex, const FCollisionShape& InSphere, const NavMeshVolume& InSourceVolume)
 {
 	TArray<NavVolumeConnection>& Connections = NavVolumeConnectionMap.FindOrAdd(InAgentIndex).FindOrAdd(InSourceVolume.ID);
 
@@ -140,12 +135,14 @@ void UNavGen3DSubsystem::FindNavMeshVolumeConnections(int32 InAgentIndex, const 
 			if (Curr->ID != InSourceVolume.ID && !FoundIDs.Contains(Curr->ID))
 			{
 				FVector Location;
-				if (FindNavMeshVolumeConnection(InAgentIndex, InCapsule, InSourceVolume, *Curr, InSortAxis, Location))
+				int32 ConnAxis = 0;
+				if (FindNavMeshVolumeConnection(InAgentIndex, InSphere, InSourceVolume, *Curr, InSortAxis, Location, ConnAxis))
 				{
 					FoundIDs.Add(Curr->ID);
 					NavVolumeConnection Conn;
 					Conn.ID = Curr->ID;
 					Conn.Location = Location;
+					Conn.ConnectionAxis = ConnAxis;
 					Connections.Add(Conn);
 				}
 			}
@@ -179,7 +176,7 @@ const TArray<NavVolumeConnection>* UNavGen3DSubsystem::GetVolumeConnections(int3
 	return nullptr;
 }
 
-bool UNavGen3DSubsystem::FindNavMeshVolumeConnection(int32 InAgentIndex, const FCollisionShape& InCapsule, const NavMeshVolume& InSourceVolume, const NavMeshVolume& InNeighborVolume, int32 InAxis, FVector& OutLocation)
+bool UNavGen3DSubsystem::FindNavMeshVolumeConnection(int32 InAgentIndex, const FCollisionShape& InSphere, const NavMeshVolume& InSourceVolume, const NavMeshVolume& InNeighborVolume, int32 InAxis, FVector& OutLocation, int32& OutConnectionAxis)
 {
 	const FBox& S = InSourceVolume.Bounds;
 	const FBox& N = InNeighborVolume.Bounds;
@@ -188,8 +185,8 @@ bool UNavGen3DSubsystem::FindNavMeshVolumeConnection(int32 InAgentIndex, const F
 	const float NMin = N.Min[InAxis], NMax = N.Max[InAxis];
 
 	float SharedValue;
-	if      (FMath::IsNearlyEqual(SMin, NMax, Epsilon)) SharedValue = SMin;
-	else if (FMath::IsNearlyEqual(SMax, NMin, Epsilon)) SharedValue = SMax;
+	if      (FMath::IsNearlyEqual(SMin, NMax, Epsilon)) { SharedValue = SMin; OutConnectionAxis = -(InAxis + 1); }
+	else if (FMath::IsNearlyEqual(SMax, NMin, Epsilon)) { SharedValue = SMax; OutConnectionAxis =  (InAxis + 1); }
 	else return false;
 
 	const int32 A1 = (InAxis + 1) % 3;
@@ -205,7 +202,12 @@ bool UNavGen3DSubsystem::FindNavMeshVolumeConnection(int32 InAgentIndex, const F
 		OutLocation[InAxis] = SharedValue;
 		OutLocation[A1]     = (OMin1 + OMax1) * 0.5f;
 		OutLocation[A2]     = (OMin2 + OMax2) * 0.5f;
-		return ValidateConnectionCollision(InCapsule, OutLocation);
+
+		const float SphereRadius = InSphere.GetSphereRadius();
+		FVector TraceEnd = OutLocation;
+		TraceEnd[InAxis] = (OutConnectionAxis > 0) ? NMax - SphereRadius : NMin + SphereRadius;
+
+		return ValidateConnectionCollision(InSphere, OutLocation, TraceEnd);
 	}
 
 	return false;
@@ -226,6 +228,17 @@ bool UNavGen3DSubsystem::GetAgentSettings(int32 InIndex, float& OutRadius, float
 	OutRadius = Agents[InIndex].AgentRadius;
 	OutHeight = Agents[InIndex].AgentHeight;
 	return true;
+}
+
+float UNavGen3DSubsystem::GetAgentCollisionRadius(int32 InAgentIndex, bool bPadded) const
+{
+	float Radius, Height;
+	if (!GetAgentSettings(InAgentIndex, Radius, Height))
+	{
+		return 50.0f;
+	}
+	const float BaseRadius = FMath::Max(Radius, Height * 0.5f);
+	return bPadded ? 1.1f * BaseRadius : BaseRadius;
 }
 
 bool UNavGen3DSubsystem::IsPlayMode()
@@ -667,16 +680,32 @@ bool UNavGen3DSubsystem::ProcessNavMeshVolume(NavMeshVolume& RefVolume, bool InD
 
 NavMeshVolume* UNavGen3DSubsystem::FindVolumeContainingLocation(const FVector& InLocation)
 {
-	const uint64 LocationHash = CalculateHash3D(InLocation);
-	if (const TArray<uint64>* VolumeIDs = NavMeshSolutionMapByLocation.Find(LocationHash))
+	const int32 GridSize = GetDefault<UNavGen3DSettings>()->MaxVolumeSize;
+	const int32 IX = FMath::FloorToInt(InLocation.X / GridSize);
+	const int32 IY = FMath::FloorToInt(InLocation.Y / GridSize);
+	const int32 IZ = FMath::FloorToInt(InLocation.Z / GridSize);
+
+	for (int32 DX = -1; DX <= 1; ++DX)
 	{
-		for (uint64 VolumeID : *VolumeIDs)
+		for (int32 DY = -1; DY <= 1; ++DY)
 		{
-			if (NavMeshVolume* Volume = NavMeshSolutionMap.Find(VolumeID))
+			for (int32 DZ = -1; DZ <= 1; ++DZ)
 			{
-				if (Volume->Bounds.IsInsideOrOn(InLocation))
+				const uint64 Hash = ((uint64)((IX + DX) & 0xFFFF) << 32)
+								  | ((uint64)((IY + DY) & 0xFFFF) << 16)
+								  |  (uint64)((IZ + DZ) & 0xFFFF);
+				if (const TArray<uint64>* VolumeIDs = NavMeshSolutionMapByLocation.Find(Hash))
 				{
-					return Volume;
+					for (uint64 VolumeID : *VolumeIDs)
+					{
+						if (NavMeshVolume* Volume = NavMeshSolutionMap.Find(VolumeID))
+						{
+							if (Volume->Bounds.IsInsideOrOn(InLocation))
+							{
+								return Volume;
+							}
+						}
+					}
 				}
 			}
 		}
@@ -686,8 +715,7 @@ NavMeshVolume* UNavGen3DSubsystem::FindVolumeContainingLocation(const FVector& I
 
 NavMeshVolume* UNavGen3DSubsystem::FindClosestVolumeContainingLocation(int32 InAgentIndex, const FVector& InLocation)
 {
-	float AgentRadius, AgentHeight;
-	const bool bHasCapsule = GetAgentSettings(InAgentIndex, AgentRadius, AgentHeight);
+	const FCollisionShape Sphere = FCollisionShape::MakeSphere(GetAgentCollisionRadius(InAgentIndex, true));
 
 	const TMap<uint64, TArray<NavVolumeConnection>>* AgentMap = NavVolumeConnectionMap.Find(InAgentIndex);
 	UWorld* World = FindWorld();
@@ -717,11 +745,10 @@ NavMeshVolume* UNavGen3DSubsystem::FindClosestVolumeContainingLocation(int32 InA
 			ClosestDistSq = DistSq;
 			ClosestVolume = &Volume;
 		}
-		else if (World && bHasCapsule)
+		else if (World)
 		{
-			const FCollisionShape Capsule = FCollisionShape::MakeCapsule(AgentRadius, AgentHeight * 0.5f);
 			FHitResult HitResult;
-			if (!World->SweepSingleByChannel(HitResult, InLocation, VolumeCenter, FQuat::Identity, ECC_WorldStatic, Capsule))
+			if (!World->SweepSingleByChannel(HitResult, InLocation, VolumeCenter, FQuat::Identity, ECC_WorldStatic, Sphere))
 			{
 				ClosestDistSq = DistSq;
 				ClosestVolume = &Volume;
@@ -742,6 +769,8 @@ bool UNavGen3DSubsystem::PathFind(FPathSearchSpace& InSearchSpace)
 	InSearchSpace.Status = EPathSearchStatus::InProgress;
 	InSearchSpace.NodeHeap.Reset();
 	InSearchSpace.PathSolution.Reset();
+	InSearchSpace.PathVolumeIDs.Reset();
+	InSearchSpace.PathConnectionAxes.Reset();
 
 	const TMap<uint64, TArray<NavVolumeConnection>>* AgentMap = NavVolumeConnectionMap.Find(InSearchSpace.AgentIndex);
 	if (!AgentMap)
@@ -762,6 +791,7 @@ bool UNavGen3DSubsystem::PathFind(FPathSearchSpace& InSearchSpace)
 
 	TMap<uint64, uint64> CameFrom;
 	TMap<uint64, FVector> ConnectionLocations;
+	TMap<uint64, int32> ConnectionAxisMap;
 	TMap<uint64, float> GCost;
 	TSet<uint64> ClosedSet;
 
@@ -800,13 +830,23 @@ bool UNavGen3DSubsystem::PathFind(FPathSearchSpace& InSearchSpace)
 				{
 					InSearchSpace.PathSolution.Insert(*Loc, 0);
 				}
+				InSearchSpace.PathVolumeIDs.Insert(TraceID, 0);
+				if (const int32* Axis = ConnectionAxisMap.Find(TraceID))
+				{
+					InSearchSpace.PathConnectionAxes.Insert(*Axis, 0);
+				}
 				const uint64* Prev = CameFrom.Find(TraceID);
 				if (!Prev) break;
 				TraceID = *Prev;
 			}
 			InSearchSpace.PathSolution.Insert(InSearchSpace.Origin, 0);
+			InSearchSpace.PathVolumeIDs.Insert(InSearchSpace.OriginID, 0);
+			InSearchSpace.PathConnectionAxes.Insert(0, 0);
 			InSearchSpace.PathSolution.Add(InSearchSpace.Destination);
+			InSearchSpace.PathVolumeIDs.Add(InSearchSpace.DestinationID);
+			InSearchSpace.PathConnectionAxes.Add(0);
 			InSearchSpace.Status = EPathSearchStatus::Success;
+			FindPathPostProcess(InSearchSpace);
 			return true;
 		}
 
@@ -833,6 +873,7 @@ bool UNavGen3DSubsystem::PathFind(FPathSearchSpace& InSearchSpace)
 			GCost.Add(NeighborID, NewGCost);
 			CameFrom.Add(NeighborID, CurrentID);
 			ConnectionLocations.Add(NeighborID, Conn.Location);
+			ConnectionAxisMap.Add(NeighborID, Conn.ConnectionAxis);
 
 			FPathSearchNode NeighborNode;
 			NeighborNode.VolumeID = NeighborID;
@@ -848,51 +889,153 @@ bool UNavGen3DSubsystem::PathFind(FPathSearchSpace& InSearchSpace)
 
 void UNavGen3DSubsystem::FindPathPostProcess(FPathSearchSpace& InSearchSpace)
 {
-	if (InSearchSpace.Status != EPathSearchStatus::Success || InSearchSpace.PathSolution.Num() < 3)
+	if (!PathSmoothingEnabled)
+	{
+		return;
+	}
+	if (InSearchSpace.Status != EPathSearchStatus::Success || InSearchSpace.PathSolution.Num() < 2)
 	{
 		return;
 	}
 
-	auto GetDominantAxis = [](const FVector& From, const FVector& To) -> int32
+	const float PaddedRadius = GetAgentCollisionRadius(InSearchSpace.AgentIndex, true);
+
+	TArray<FVector>& Path = InSearchSpace.PathSolution;
+
+	// Capture before the loop — Path grows but PathConnectionAxes/PathVolumeIDs stay fixed.
+	const int32 LastConnIndex = InSearchSpace.PathConnectionAxes.Num() - 2;
+
+	// Iterate backwards so insertions don't shift indices we haven't visited yet.
+	// Per connection: insert after-node first (at i+1), then before-node (at i).
+	// This order keeps the connection at index i stable when we insert the before-node.
+	for (int32 i = LastConnIndex; i >= 1; --i)
 	{
-		const FVector Delta = (To - From).GetAbs();
-		if (Delta.X >= Delta.Y && Delta.X >= Delta.Z) return 0;
-		if (Delta.Y >= Delta.Z) return 1;
-		return 2;
-	};
+		const int32 ConnAxis = InSearchSpace.PathConnectionAxes[i];
+		if (ConnAxis == 0) continue;
 
-	TArray<FVector> Result;
-	Result.Add(InSearchSpace.PathSolution[0]);
+		const int32 AxisIdx = FMath::Abs(ConnAxis) - 1;
+		FVector ConnDir = FVector::ZeroVector;
+		ConnDir[AxisIdx] = ConnAxis > 0 ? 1.0f : -1.0f;
 
-	for (int32 i = 1; i < InSearchSpace.PathSolution.Num() - 1; ++i)
-	{
-		const FVector& Prev = InSearchSpace.PathSolution[i - 1];
-		const FVector& Curr = InSearchSpace.PathSolution[i];
-		const FVector& Next = InSearchSpace.PathSolution[i + 1];
+		const FVector ConnPoint = Path[i];
 
-		const int32 InAxis  = GetDominantAxis(Prev, Curr);
-		const int32 OutAxis = GetDominantAxis(Curr, Next);
-
-		if (InAxis != OutAxis && !FMath::IsNearlyEqual(Prev[OutAxis], Curr[OutAxis], Epsilon))
+		// After-connection node: into the volume being entered.
+		if (const NavMeshVolume* EnteredVol = NavMeshSolutionMap.Find(InSearchSpace.PathVolumeIDs[i]))
 		{
-			FVector Intermediate = Curr;
-			Intermediate[OutAxis] = Prev[OutAxis];
-			Result.Add(Intermediate);
+			const FVector VolumeCenter = EnteredVol->Bounds.GetCenter();
+			const float RightAngleDist = FVector::DotProduct(ConnDir, VolumeCenter - ConnPoint);
+			const float InsertDist = FMath::Max(PaddedRadius, RightAngleDist);
+			Path.Insert(ConnPoint + ConnDir * InsertDist, i + 1);
 		}
 
-		Result.Add(Curr);
+		// Before-connection node: into the volume being left.
+		if (const NavMeshVolume* LeavingVol = NavMeshSolutionMap.Find(InSearchSpace.PathVolumeIDs[i - 1]))
+		{
+			const FVector VolumeCenter = LeavingVol->Bounds.GetCenter();
+			const float RightAngleDist = FVector::DotProduct(ConnDir, ConnPoint - VolumeCenter);
+			const float InsertDist = FMath::Min(PaddedRadius, RightAngleDist);
+			Path.Insert(ConnPoint - ConnDir * InsertDist, i);
+		}
 	}
 
-	Result.Add(InSearchSpace.PathSolution.Last());
-	InSearchSpace.PathSolution = MoveTemp(Result);
+	// Simplification pass: backward string-pull with unpadded sphere trace.
+	UWorld* World = FindWorld();
+	if (!World || Path.Num() < 3)
+	{
+		return;
+	}
+
+	const FCollisionShape UnpaddedSphere = FCollisionShape::MakeSphere(GetAgentCollisionRadius(InSearchSpace.AgentIndex, false));
+
+	int32 ThreadEndIdx = Path.Num() - 1;
+
+	while (ThreadEndIdx >= 2)
+	{
+		int32 ThreadStartIdx = ThreadEndIdx - 2;
+		int32 LastValidThreadStart = ThreadEndIdx - 1;
+
+		while (ThreadStartIdx >= 0)
+		{
+			FHitResult Hit;
+			const bool bHit = World->SweepSingleByChannel(Hit, Path[ThreadEndIdx], Path[ThreadStartIdx], FQuat::Identity, ECC_WorldStatic, UnpaddedSphere);
+
+			if (!bHit)
+			{
+				LastValidThreadStart = ThreadStartIdx;
+				--ThreadStartIdx;
+			}
+			else
+			{
+				break;
+			}
+		}
+
+		const int32 NumToRemove = ThreadEndIdx - LastValidThreadStart - 1;
+		if (NumToRemove > 0)
+		{
+			Path.RemoveAt(LastValidThreadStart + 1, NumToRemove);
+		}
+
+		ThreadEndIdx = LastValidThreadStart;
+	}
 }
 
-void UNavGen3DSubsystem::DebugPathToCamera()
+void UNavGen3DSubsystem::DebugFindPath(FVector InOrigin, FVector InDestination)
 {
-	DebugPathDestination = GetCameraLocation();
+	if (InOrigin != InvalidLocation)
+	{
+		DebugPathOrigin = InOrigin;
+	}
+
+	if (DebugPathOrigin == InvalidLocation)
+	{
+		AddLogMessage(ENavGen3DLogCategory::Warning, TEXT(""), TEXT("Set DebugPathOrigin"));
+		return;
+	}
+
+	if (InDestination != InvalidLocation)
+	{
+		DebugPathDestination = InDestination;
+	}
+	else if (DebugPathDestination == InvalidLocation)
+	{
+		DebugPathDestination = GetCameraLocation();
+	}
+
 	DebugPathSearchSpace.Initialize(this, DebugNavMeshAgentIndex, DebugPathOrigin, DebugPathDestination);
 	PathFind(DebugPathSearchSpace);
-	FindPathPostProcess(DebugPathSearchSpace);
+}
+
+bool UNavGen3DSubsystem::DebugValidatePath(const FPathSearchSpace& InSearchSpace)
+{
+	if (InSearchSpace.Status != EPathSearchStatus::Success)
+	{
+		return false;
+	}
+
+	UWorld* World = FindWorld();
+	if (!World)
+	{
+		return false;
+	}
+
+	const FCollisionShape Sphere = FCollisionShape::MakeSphere(GetAgentCollisionRadius(InSearchSpace.AgentIndex, false));
+	bool bValid = true;
+
+	const TArray<FVector>& Path = InSearchSpace.PathSolution;
+	for (int32 i = 0; i < Path.Num() - 1; ++i)
+	{
+		FHitResult HitResult;
+		if (World->SweepSingleByChannel(HitResult, Path[i], Path[i + 1], FQuat::Identity, ECC_WorldStatic, Sphere))
+		{
+			AddLogMessage(ENavGen3DLogCategory::Warning, TEXT("PathValidation"),
+				FString::Printf(TEXT("Collision at %s"), *FVectorToString(HitResult.ImpactPoint)));
+			DrawDebugSphere(World, HitResult.ImpactPoint, 15.0f, 8, FColor::Red, false, 30.0f);
+			bValid = false;
+		}
+	}
+
+	return bValid;
 }
 
 void FPathSearchSpace::DrawPath(float InDrawTime) const
@@ -911,12 +1054,29 @@ void FPathSearchSpace::DrawPath(float InDrawTime) const
 
 	for (int32 i = 0; i < PathSolution.Num(); ++i)
 	{
-		DrawDebugSphere(World, PathSolution[i], 10.0f, 8, FColor::Cyan, false, InDrawTime);
+		const bool bIntermediate = bIsIntermediate.IsValidIndex(i) && bIsIntermediate[i];
+		const FColor NodeColor = bIntermediate ? FColor::Orange : FColor::Cyan;
+		DrawDebugSphere(World, PathSolution[i], 10.0f, 8, NodeColor, false, InDrawTime);
 		if (i > 0)
 		{
 			DrawDebugLine(World, PathSolution[i - 1], PathSolution[i], FColor::Cyan, false, InDrawTime, 0, 3.0f);
 		}
 	}
+}
+
+void FPathSearchSpace::Reset()
+{
+	AgentIndex = -1;
+	OriginID = 0;
+	DestinationID = 0;
+	Origin = UNavGen3DSubsystem::InvalidLocation;
+	Destination = UNavGen3DSubsystem::InvalidLocation;
+	PathSolution.Reset();
+	PathVolumeIDs.Reset();
+	PathConnectionAxes.Reset();
+	bIsIntermediate.Reset();
+	NodeHeap.Reset();
+	Status = EPathSearchStatus::None;
 }
 
 void FPathSearchSpace::Initialize(UNavGen3DSubsystem* InSubsystem, int32 InAgentIndex, const FVector& PathOrigin, const FVector& PathDestination)
@@ -1095,14 +1255,17 @@ void UNavGen3DSubsystem::RemoveNavMeshVolume(uint64 InID)
 	NavMeshSolutionMap.Remove(InID);
 }
 
-bool UNavGen3DSubsystem::ValidateConnectionCollision(const FCollisionShape& InCapsule, const FVector& InLocation)
+bool UNavGen3DSubsystem::ValidateConnectionCollision(const FCollisionShape& InSphere, const FVector& InStart, const FVector& InEnd)
 {
 	UWorld* World = FindWorld();
 	if (!World)
 	{
 		return false;
 	}
-	return !World->OverlapBlockingTestByChannel(InLocation, FQuat::Identity, ECC_WorldStatic, InCapsule);
+	FHitResult Hit;
+	const bool bHit = World->SweepSingleByChannel(Hit, InStart, InEnd, FQuat::Identity, ECC_WorldStatic, InSphere);
+
+	return !bHit;
 }
 
 bool UNavGen3DSubsystem::PlaneTrace(FVector InMin, FVector InMax, EAxis::Type InAxis, FVector& OutImpactPoint, bool& OutStartPenetrating)
@@ -1179,16 +1342,12 @@ bool UNavGen3DSubsystem::GenerateNavMesh3D(NavMeshVolume* InVolume)
 			const int32 AgentCount = GetSupportedAgentCount();
 			for (int32 AgentIndex = 0; AgentIndex < AgentCount; ++AgentIndex)
 			{
-				float AgentRadius, AgentHeight;
-				if (GetAgentSettings(AgentIndex, AgentRadius, AgentHeight))
+				const FCollisionShape Sphere = FCollisionShape::MakeSphere(GetAgentCollisionRadius(AgentIndex, true));
+				if (TMap<uint64, TArray<NavVolumeConnection>>* AgentMap = NavVolumeConnectionMap.Find(AgentIndex))
 				{
-					const FCollisionShape Capsule = FCollisionShape::MakeCapsule(AgentRadius, AgentHeight * 0.5f);
-					if (TMap<uint64, TArray<NavVolumeConnection>>* AgentMap = NavVolumeConnectionMap.Find(AgentIndex))
-					{
-						AgentMap->Remove(InVolume->ID);
-					}
-					FindNavMeshVolumeConnections(AgentIndex, Capsule, *InVolume);
+					AgentMap->Remove(InVolume->ID);
 				}
+				FindNavMeshVolumeConnections(AgentIndex, Sphere, *InVolume);
 			}
 		}
 
@@ -1301,15 +1460,23 @@ bool UNavGen3DSubsystem::ValidateNavMesh3D(NavMeshVolume* InVolume)
 		bValid = false;
 	}
 
-	float AgentRadius, AgentHeight;
-	if (GetAgentSettings(DebugNavMeshAgentIndex, AgentRadius, AgentHeight))
 	{
-		const FCollisionShape Capsule = FCollisionShape::MakeCapsule(AgentRadius, AgentHeight * 0.5f);
+		const FCollisionShape Sphere = FCollisionShape::MakeSphere(GetAgentCollisionRadius(DebugNavMeshAgentIndex, true));
 		if (const TArray<NavVolumeConnection>* Connections = GetVolumeConnections(DebugNavMeshAgentIndex, InVolume->ID))
 		{
 			for (const NavVolumeConnection& Conn : *Connections)
 			{
-				if (!ValidateConnectionCollision(Capsule, Conn.Location))
+				const NavMeshVolume* NeighborVol = NavMeshSolutionMap.Find(Conn.ID);
+				if (!NeighborVol) continue;
+
+				const int32 AxisIdx = FMath::Abs(Conn.ConnectionAxis) - 1;
+				const float SphereRadius = Sphere.GetSphereRadius();
+				FVector TraceEnd = Conn.Location;
+				TraceEnd[AxisIdx] = (Conn.ConnectionAxis > 0)
+					? NeighborVol->Bounds.Max[AxisIdx] - SphereRadius
+					: NeighborVol->Bounds.Min[AxisIdx] + SphereRadius;
+
+				if (!ValidateConnectionCollision(Sphere, Conn.Location, TraceEnd))
 				{
 					AddLogMessage(ENavGen3DLogCategory::Warning, ActorName,
 						FString::Printf(TEXT("Connection validation failed for volume ID %llu, connection to ID %llu"), InVolume->ID, Conn.ID));
@@ -1562,7 +1729,7 @@ void UNavGen3DSubsystem::OnEndFrame()
 		}
 	}
 
-	if (DebugPathOrigin != FVector(FLT_MAX) && World)
+	if (DebugPathOrigin != InvalidLocation && World)
 	{
 		DrawDebugSphere(World, DebugPathOrigin, 20.0f, 12, FColor(128, 0, 128), false, DrawTime);
 		DrawDebugString(World, DebugPathOrigin, *FString::Printf(TEXT("Origin: %s"), *FVectorToString(DebugPathOrigin)), nullptr, FColor::White, DrawTime);
@@ -1573,16 +1740,40 @@ void UNavGen3DSubsystem::OnEndFrame()
 		}
 	}
 
-	if (DebugPathDestination != FVector(FLT_MAX) && World)
+	if (DebugPathDestination != InvalidLocation && World)
 	{
 		DrawDebugSphere(World, DebugPathDestination, 20.0f, 12, FColor::Cyan, false, DrawTime);
 
-		if (DebugPathOrigin != FVector(FLT_MAX) &&
+		if (DebugPathOrigin != InvalidLocation &&
 			DebugPathSearchSpace.Origin == DebugPathOrigin &&
 			DebugPathSearchSpace.Destination == DebugPathDestination &&
 			DebugPathSearchSpace.Status == EPathSearchStatus::Fail)
 		{
 			DrawDebugLine(World, DebugPathOrigin, DebugPathDestination, FColor::Red, false, DrawTime, 0, 3.0f);
+		}
+	}
+
+	if (DebugRepathContinuous && World && DebugPathOrigin != InvalidLocation)
+	{
+		DebugRepathTimer += World->GetDeltaSeconds();
+		if (DebugRepathTimer >= DebugRepathFrequency)
+		{
+			DebugRepathTimer = 0.0f;
+
+			float AgentRadius, AgentHeight;
+			if (GetAgentSettings(DebugNavMeshAgentIndex, AgentRadius, AgentHeight))
+			{
+				const float Threshold = FMath::Min(AgentRadius, AgentHeight * 0.5f);
+				const FVector CurrentDestination = GetCameraLocation();
+
+				const bool bOriginMoved = FVector::Dist(DebugPathOrigin, DebugPathSearchSpace.Origin) >= Threshold;
+				const bool bDestinationMoved = FVector::Dist(CurrentDestination, DebugPathSearchSpace.Destination) >= Threshold;
+
+				if (bOriginMoved || bDestinationMoved)
+				{
+					DebugFindPath(InvalidLocation, CurrentDestination);
+				}
+			}
 		}
 	}
 }

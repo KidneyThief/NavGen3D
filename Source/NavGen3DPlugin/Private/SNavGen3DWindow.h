@@ -32,8 +32,15 @@ private:
 	void OnVolumeIDTextChanged(const FText& InText);
 	void OnVolumeIDTextCommitted(const FText& InText, ETextCommit::Type InCommitType);
 	EVisibility GetPathOriginStatusVisibility() const;
+	FText GetDebugPathOriginText() const;
+	FText GetDebugPathDestinationText() const;
+	FReply OnResetPathClicked();
 	FReply OnSetPathOriginClicked();
 	FReply OnPathToCameraClicked();
+	void OnDebugRepathContinuousChanged(ECheckBoxState InNewState);
+	ECheckBoxState GetPathSmoothingState() const;
+	void OnPathSmoothingChanged(ECheckBoxState InNewState);
+	FReply OnRePathClicked();
 	float GetNavMeshAgentSliderValue() const;
 	float GetNavMeshAgentSliderMax() const;
 	void OnNavMeshAgentSliderChanged(float InNewValue);
