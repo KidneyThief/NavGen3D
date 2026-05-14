@@ -25,8 +25,8 @@ private:
 	void OnDrawModeRadioChanged(ECheckBoxState InNewState, ENavGen3DDrawMode InMode);
 	ECheckBoxState GetDrawConnectionsState() const;
 	void OnDrawConnectionsChanged(ECheckBoxState InNewState);
-	ECheckBoxState GetDrawConnectedState() const;
-	void OnDrawConnectedChanged(ECheckBoxState InNewState);
+	ECheckBoxState GetDrawConnectivityState() const;
+	void OnDrawConnectivityChanged(ECheckBoxState InNewState);
 	ECheckBoxState GetDrawCameraVolumeState() const;
 	void OnDrawCameraVolumeChanged(ECheckBoxState InNewState);
 	void OnVolumeIDTextChanged(const FText& InText);

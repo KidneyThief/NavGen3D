@@ -83,6 +83,7 @@ public:
 	void ValidateEmbeddedBoundsVolumes();
 	bool ValidateNavMesh3D(NavMeshVolume* InVolume = nullptr);
 	void PruneNavMesh3D();
+	void DetermineConnectivity();
 	void SetNavGen3DWindow(TSharedPtr<SNavGen3DWindow> InWindow);
 	void AddLogMessage(ENavGen3DLogCategory InCategory, const FString& InActorName, const FString& InMessage);
 
@@ -106,7 +107,7 @@ public:
 	int32 GetSolutionVolumesCount() const { return NavMeshSolutionMap.Num(); }
 	uint64 CalculateHash3D(const FVector& InVec) const;
 	NavMeshVolume* FindVolumeContainingLocation(const FVector& InLocation);
-	NavMeshVolume* FindClosestVolumeContainingLocation(int32 InAgentIndex, const FVector& InLocation);
+	NavMeshVolume* FindClosestVolumeContainingLocation(int32 InAgentIndex, const FVector& InLocation, int32 InConnectivityID = 0);
 	bool PathFind(FPathSearchSpace& InSearchSpace);
 	void FindPathPostProcess(FPathSearchSpace& InSearchSpace);
 	void DebugFindPath(FVector InOrigin = InvalidLocation, FVector InDestination = InvalidLocation);
@@ -125,7 +126,7 @@ public:
 	bool DebugDrawConnections = false;
 
 	UPROPERTY()
-	bool DrawConnected = false;
+	bool DrawConnectivity = false;
 
 	UPROPERTY()
 	bool PathSmoothingEnabled = false;

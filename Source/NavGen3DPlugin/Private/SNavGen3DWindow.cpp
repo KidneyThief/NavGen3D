@@ -269,7 +269,7 @@ void SNavGen3DWindow::Construct(const FArguments& InArgs)
 							.VAlign(VAlign_Center)
 							[
 								SNew(STextBlock)
-								.Text(FText::FromString("Draw Connected:  "))
+								.Text(FText::FromString("Draw Connectivity:  "))
 								.ColorAndOpacity(TextColor)
 							]
 
@@ -278,8 +278,8 @@ void SNavGen3DWindow::Construct(const FArguments& InArgs)
 							.VAlign(VAlign_Center)
 							[
 								SNew(SCheckBox)
-								.IsChecked(this, &SNavGen3DWindow::GetDrawConnectedState)
-								.OnCheckStateChanged(this, &SNavGen3DWindow::OnDrawConnectedChanged)
+								.IsChecked(this, &SNavGen3DWindow::GetDrawConnectivityState)
+								.OnCheckStateChanged(this, &SNavGen3DWindow::OnDrawConnectivityChanged)
 							]
 						]
 
@@ -1012,20 +1012,20 @@ void SNavGen3DWindow::OnDrawConnectionsChanged(ECheckBoxState InNewState)
 	}
 }
 
-ECheckBoxState SNavGen3DWindow::GetDrawConnectedState() const
+ECheckBoxState SNavGen3DWindow::GetDrawConnectivityState() const
 {
 	if (const UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
 	{
-		return Subsystem->DrawConnected ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+		return Subsystem->DrawConnectivity ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
 	}
 	return ECheckBoxState::Unchecked;
 }
 
-void SNavGen3DWindow::OnDrawConnectedChanged(ECheckBoxState InNewState)
+void SNavGen3DWindow::OnDrawConnectivityChanged(ECheckBoxState InNewState)
 {
 	if (UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
 	{
-		Subsystem->DrawConnected = (InNewState == ECheckBoxState::Checked);
+		Subsystem->DrawConnectivity = (InNewState == ECheckBoxState::Checked);
 	}
 }
 

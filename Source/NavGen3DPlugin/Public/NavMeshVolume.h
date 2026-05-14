@@ -14,6 +14,7 @@ struct NavMeshVolume
 	uint64 Next_X = 0;
 	uint64 Next_Y = 0;
 	uint64 Next_Z = 0;
+	TMap<int32, int32> ConnectivityIDByAgent;
 };
 
 struct NavVolumeConnection

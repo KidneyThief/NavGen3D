@@ -101,6 +101,8 @@ bool UNavGen3DSubsystem::GenerateNavMesh3DConnections(int32 InAgentIndex)
 		}
 	}
 
+	DetermineConnectivity();
+
 	return true;
 }
 
@@ -751,7 +753,7 @@ NavMeshVolume* UNavGen3DSubsystem::FindVolumeContainingLocation(const FVector& I
 	return nullptr;
 }
 
-NavMeshVolume* UNavGen3DSubsystem::FindClosestVolumeContainingLocation(int32 InAgentIndex, const FVector& InLocation)
+NavMeshVolume* UNavGen3DSubsystem::FindClosestVolumeContainingLocation(int32 InAgentIndex, const FVector& InLocation, int32 InConnectivityID)
 {
 	const FCollisionShape Sphere = FCollisionShape::MakeSphere(GetAgentCollisionRadius(InAgentIndex, true));
 
@@ -769,6 +771,15 @@ NavMeshVolume* UNavGen3DSubsystem::FindClosestVolumeContainingLocation(int32 InA
 		if (AgentMap && !AgentMap->Contains(Volume.ID))
 		{
 			continue;
+		}
+
+		if (InConnectivityID > 0)
+		{
+			const int32* ConnID = Volume.ConnectivityIDByAgent.Find(InAgentIndex);
+			if (!ConnID || *ConnID != InConnectivityID)
+			{
+				continue;
+			}
 		}
 
 		const FVector VolumeCenter = Volume.Bounds.GetCenter();
@@ -1125,12 +1136,17 @@ void FPathSearchSpace::Initialize(UNavGen3DSubsystem* InSubsystem, int32 InAgent
 
 	if (InSubsystem)
 	{
+		int32 OriginConnectivityID = 0;
 		if (const NavMeshVolume* OriginVolume = InSubsystem->FindClosestVolumeContainingLocation(InAgentIndex, PathOrigin))
 		{
 			OriginID = OriginVolume->ID;
+			if (const int32* ConnID = OriginVolume->ConnectivityIDByAgent.Find(InAgentIndex))
+			{
+				OriginConnectivityID = *ConnID;
+			}
 		}
 
-		if (const NavMeshVolume* DestinationVolume = InSubsystem->FindClosestVolumeContainingLocation(InAgentIndex, PathDestination))
+		if (const NavMeshVolume* DestinationVolume = InSubsystem->FindClosestVolumeContainingLocation(InAgentIndex, PathDestination, OriginConnectivityID))
 		{
 			DestinationID = DestinationVolume->ID;
 		}
@@ -1586,6 +1602,67 @@ void UNavGen3DSubsystem::PruneNavMesh3D()
 		FString::Printf(TEXT("Pruned %d disconnected volumes"), VolumesToRemove.Num()));
 }
 
+void UNavGen3DSubsystem::DetermineConnectivity()
+{
+	for (auto& Pair : NavMeshSolutionMap)
+	{
+		Pair.Value.ConnectivityIDByAgent.Reset();
+	}
+
+	const int32 AgentCount = GetSupportedAgentCount();
+	for (int32 AgentIndex = 0; AgentIndex < AgentCount; ++AgentIndex)
+	{
+		const TMap<uint64, TArray<NavVolumeConnection>>* AgentConnectionMap = NavVolumeConnectionMap.Find(AgentIndex);
+		if (!AgentConnectionMap) continue;
+
+		int32 CurrentConnectivityID = 1;
+
+		while (true)
+		{
+			uint64 SeedVolumeID = 0;
+			for (const auto& Pair : NavMeshSolutionMap)
+			{
+				const TArray<NavVolumeConnection>* Connections = AgentConnectionMap->Find(Pair.Key);
+				if (Connections && Connections->Num() > 0 && !Pair.Value.ConnectivityIDByAgent.Contains(AgentIndex))
+				{
+					SeedVolumeID = Pair.Key;
+					break;
+				}
+			}
+
+			if (SeedVolumeID == 0) break;
+
+			TArray<uint64> Queue;
+			Queue.Add(SeedVolumeID);
+
+			while (!Queue.IsEmpty())
+			{
+				const uint64 CurrentID = Queue.Pop();
+
+				NavMeshVolume* CurrentVolume = NavMeshSolutionMap.Find(CurrentID);
+				if (!CurrentVolume || CurrentVolume->ConnectivityIDByAgent.Contains(AgentIndex)) continue;
+
+				CurrentVolume->ConnectivityIDByAgent.Add(AgentIndex, CurrentConnectivityID);
+
+				const TArray<NavVolumeConnection>* Connections = AgentConnectionMap->Find(CurrentID);
+				if (Connections)
+				{
+					for (const NavVolumeConnection& Connection : *Connections)
+					{
+						NavMeshVolume* Neighbor = NavMeshSolutionMap.Find(Connection.ID);
+						if (Neighbor && !Neighbor->ConnectivityIDByAgent.Contains(AgentIndex))
+						{
+							Queue.Add(Connection.ID);
+						}
+					}
+				}
+			}
+
+			++CurrentConnectivityID;
+		}
+	}
+}
+
 void UNavGen3DSubsystem::ValidateEmbeddedBoundsVolumes()
 {
 	if (IsPlayMode())
@@ -1700,17 +1777,32 @@ void UNavGen3DSubsystem::OnEndFrame()
 					DebugDrawConnections ? NavVolumeConnectionMap.Find(DebugNavMeshAgentIndex) : nullptr;
 
 				static const TArray<FColor> VolumeColors = {
-					FColor::Red, FColor::Green, FColor::Blue, FColor::Yellow,
-					FColor::Magenta, FColor(255, 128, 0), FColor(0, 255, 128), FColor(128, 0, 255)
+					FColor(255, 0,   0),   // red
+					FColor(0,   255, 0),   // green
+					FColor(0,   0,   255), // blue
+					FColor(255, 255, 0),   // yellow
+					FColor(255, 0,   255), // magenta
+					FColor(255, 128, 0),   // orange
+					FColor(0,   255, 128), // spring green
+					FColor(128, 0,   255), // violet
 				};
 
 				for (const auto& Pair : NavMeshSolutionMap)
 				{
 					const NavMeshVolume& Volume = Pair.Value;
 					const FVector Center = Volume.Bounds.GetCenter();
-					const FColor BoxColor = DrawConnected
-						? FColor::Cyan
-						: VolumeColors[Volume.ID % VolumeColors.Num()];
+					FColor BoxColor = VolumeColors[Volume.ID % VolumeColors.Num()];
+					if (DrawConnectivity)
+					{
+						if (const int32* ConnID = Volume.ConnectivityIDByAgent.Find(DebugNavMeshAgentIndex))
+						{
+							BoxColor = VolumeColors[*ConnID % VolumeColors.Num()];
+						}
+						else
+						{
+							BoxColor = FColor(160, 160, 160);
+						}
+					}
 					DrawDebugBox(World, Center, Volume.Bounds.GetExtent(), BoxColor, false, DrawTime, 0, 3.0f);
 
 					if (AgentConnections)
