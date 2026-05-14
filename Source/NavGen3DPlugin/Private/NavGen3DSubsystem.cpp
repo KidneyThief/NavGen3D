@@ -310,10 +310,48 @@ bool UNavGen3DSubsystem::AddNavMeshVolume(NavMeshVolume& RefVolume)
 		return false;
 	}
 
+	const FVector Extent = RefVolume.Bounds.GetExtent();
+	bool bAnyAgentFits = false;
+	for (int32 AgentIndex = 0; AgentIndex < GetSupportedAgentCount(); ++AgentIndex)
+	{
+		const float PaddedRadius = GetAgentCollisionRadius(AgentIndex, true);
+		int32 ExtentsMeetingRadius = 0;
+		for (int32 i = 0; i < 3; ++i)
+		{
+			if (Extent[i] >= PaddedRadius)
+			{
+				++ExtentsMeetingRadius;
+			}
+		}
+		if (ExtentsMeetingRadius >= 2)
+		{
+			bAnyAgentFits = true;
+			break;
+		}
+	}
+	if (!bAnyAgentFits)
+	{
+		if (DebugDrawTime > 0.0f)
+		{
+			if (UWorld* World = FindWorld())
+			{
+				DrawDebugBox(World, RefVolume.Bounds.GetCenter(), Extent, FColor::Red, false, DebugDrawTime, 0, 5.0f);
+			}
+		}
+		return false;
+	}
+
 	const UNavGen3DSettings* Settings = GetDefault<UNavGen3DSettings>();
 
 	if (NavMeshSolutionMap.Num() >= Settings->MaxVolumeCount)
 	{
+		if (DebugDrawTime > 0.0f)
+		{
+			if (UWorld* World = FindWorld())
+			{
+				DrawDebugBox(World, RefVolume.Bounds.GetCenter(), Extent, FColor::Red, false, DebugDrawTime, 0, 5.0f);
+			}
+		}
 		return false;
 	}
 
@@ -1196,6 +1234,14 @@ TOptional<NavMeshVolume> UNavGen3DSubsystem::FindClosestGenerationVolume(const F
 	return bFound ? TOptional<NavMeshVolume>(ClosestVolume) : TOptional<NavMeshVolume>();
 }
 
+TOptional<NavMeshVolume> UNavGen3DSubsystem::PopNextProcessingVolume()
+{
+	if (ProcessVolumesList.IsEmpty()) return TOptional<NavMeshVolume>();
+	NavMeshVolume Result = ProcessVolumesList[0];
+	ProcessVolumesList.RemoveAt(0);
+	return Result;
+}
+
 void UNavGen3DSubsystem::RemoveNavMeshVolume(uint64 InID)
 {
 	if (NavMeshVolume* Volume = NavMeshSolutionMap.Find(InID))
@@ -1354,8 +1400,6 @@ bool UNavGen3DSubsystem::GenerateNavMesh3D(NavMeshVolume* InVolume)
 		return false;
 	}
 
-	InitializeNavMesh3D();
-
 	while (!ProcessVolumesList.IsEmpty())
 	{
 		NavMeshVolume CurrentVolume = ProcessVolumesList[0];
@@ -1370,6 +1414,7 @@ void UNavGen3DSubsystem::InitializeNavMesh3D()
 {
 	NavMeshSolutionMap.Reset();
 	NavMeshSolutionMapByLocation.Reset();
+	ProcessVolumesList.Reset();
 	NavMeshVolumeMap_X.Reset();
 	NavMeshVolumeMap_Y.Reset();
 	NavMeshVolumeMap_Z.Reset();
@@ -1385,7 +1430,7 @@ void UNavGen3DSubsystem::InitializeNavMesh3D()
 
 bool UNavGen3DSubsystem::GenerateNavMesh3DFromBoundsVolume(ANavGen3DBoundsVolume* InVolume)
 {
-	ProcessVolumesList.Reset();
+	InitializeNavMesh3D();
 
 	const FString ActorName = InVolume ? InVolume->GetActorLabel() : TEXT("<unknown>");
 	AddLogMessage(ENavGen3DLogCategory::Info, ActorName, TEXT("generating NavMesh3D..."));
@@ -1510,7 +1555,25 @@ void UNavGen3DSubsystem::PruneNavMesh3D()
 
 		if (!bHasConnections)
 		{
-			VolumesToRemove.Add(VolumeID);
+			const FVector Extent = Pair.Value.Bounds.GetExtent();
+			bool bHasSmallExtent = false;
+			for (int32 AgentIndex = 0; AgentIndex < GetSupportedAgentCount() && !bHasSmallExtent; ++AgentIndex)
+			{
+				const float PaddedRadius = GetAgentCollisionRadius(AgentIndex, true);
+				for (int32 i = 0; i < 3; ++i)
+				{
+					if (Extent[i] < PaddedRadius)
+					{
+						bHasSmallExtent = true;
+						break;
+					}
+				}
+			}
+
+			if (bHasSmallExtent)
+			{
+				VolumesToRemove.Add(VolumeID);
+			}
 		}
 	}
 

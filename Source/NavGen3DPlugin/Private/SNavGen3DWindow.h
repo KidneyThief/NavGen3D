@@ -53,6 +53,8 @@ private:
 	FReply OnGenerateNavMesh3DForSelectionClicked();
 	FReply OnGenerateVolumesClicked();
 	FReply OnFindConnectionsClicked();
+	FReply OnProcessNextVolumeClicked();
+	FReply OnProcessRemainingVolumesClicked();
 	FReply OnProcessCameraVolumeClicked();
 	FReply OnValidateCameraVolumeClicked();
 	FReply OnFindCameraVolumeConnectionsClicked();

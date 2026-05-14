@@ -523,18 +523,32 @@ void SNavGen3DWindow::Construct(const FArguments& InArgs)
 							+ SUniformGridPanel::Slot(0, 0)
 							[
 								SNew(SButton)
+								.Text(FText::FromString("Process Next Volume"))
+								.OnClicked(this, &SNavGen3DWindow::OnProcessNextVolumeClicked)
+							]
+
+							+ SUniformGridPanel::Slot(0, 1)
+							[
+								SNew(SButton)
+								.Text(FText::FromString("Process Remaining Volumes"))
+								.OnClicked(this, &SNavGen3DWindow::OnProcessRemainingVolumesClicked)
+							]
+
+							+ SUniformGridPanel::Slot(0, 2)
+							[
+								SNew(SButton)
 								.Text(FText::FromString("Process Camera Volume"))
 								.OnClicked(this, &SNavGen3DWindow::OnProcessCameraVolumeClicked)
 							]
 
-							+ SUniformGridPanel::Slot(0, 1)
+							+ SUniformGridPanel::Slot(0, 3)
 							[
 								SNew(SButton)
 								.Text(FText::FromString("Validate Camera Volume"))
 								.OnClicked(this, &SNavGen3DWindow::OnValidateCameraVolumeClicked)
 							]
 
-							+ SUniformGridPanel::Slot(0, 2)
+							+ SUniformGridPanel::Slot(0, 4)
 							[
 								SNew(SButton)
 								.Text(FText::FromString("Find Camera Volume Connections"))
@@ -1129,7 +1143,6 @@ FReply SNavGen3DWindow::OnGenerateVolumesClicked()
 {
 	if (UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
 	{
-		Subsystem->InitializeNavMesh3D();
 		if (GEditor)
 		{
 			for (FSelectionIterator It(GEditor->GetSelectedActorIterator()); It; ++It)
@@ -1292,6 +1305,37 @@ FReply SNavGen3DWindow::OnResetNavMesh3DClicked()
 	if (UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
 	{
 		Subsystem->InitializeNavMesh3D();
+	}
+	return FReply::Handled();
+}
+
+FReply SNavGen3DWindow::OnProcessNextVolumeClicked()
+{
+	if (UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
+	{
+		TOptional<NavMeshVolume> NextVolume = Subsystem->PopNextProcessingVolume();
+		if (!NextVolume.IsSet())
+		{
+			const FVector CameraLocation = Subsystem->GetCameraLocation();
+			NextVolume = Subsystem->FindGenerationVolumeContainingLocation(CameraLocation, true);
+			if (!NextVolume.IsSet())
+			{
+				NextVolume = Subsystem->FindClosestGenerationVolume(CameraLocation, true);
+			}
+		}
+		if (NextVolume.IsSet())
+		{
+			Subsystem->ProcessNavMeshVolume(NextVolume.GetValue(), true);
+		}
+	}
+	return FReply::Handled();
+}
+
+FReply SNavGen3DWindow::OnProcessRemainingVolumesClicked()
+{
+	if (UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
+	{
+		Subsystem->GenerateNavMesh3D();
 	}
 	return FReply::Handled();
 }

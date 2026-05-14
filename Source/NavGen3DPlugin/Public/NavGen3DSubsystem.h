@@ -113,6 +113,7 @@ public:
 	bool DebugValidatePath(const FPathSearchSpace& InSearchSpace);
 	TOptional<NavMeshVolume> FindGenerationVolumeContainingLocation(const FVector& InLocation, bool InRemoveFromProcessing);
 	TOptional<NavMeshVolume> FindClosestGenerationVolume(const FVector& InLocation, bool InRemoveFromProcessing);
+	TOptional<NavMeshVolume> PopNextProcessingVolume();
 
 	UPROPERTY()
 	ENavGen3DDrawMode DebugDrawMode = ENavGen3DDrawMode::None;
