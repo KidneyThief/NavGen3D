@@ -32,6 +32,7 @@ private:
 	void OnVolumeIDTextChanged(const FText& InText);
 	void OnVolumeIDTextCommitted(const FText& InText, ETextCommit::Type InCommitType);
 	EVisibility GetPathOriginStatusVisibility() const;
+	FText GetPathOriginStatusText() const;
 	FText GetDebugPathOriginText() const;
 	FText GetDebugPathDestinationText() const;
 	FReply OnResetPathClicked();
@@ -56,10 +57,17 @@ private:
 	FReply OnProcessNextVolumeClicked();
 	FReply OnProcessRemainingVolumesClicked();
 	FReply OnProcessCameraVolumeClicked();
+	FReply OnUndoLastProcessClicked();
+	bool IsUndoLastProcessEnabled() const;
+	bool IsPathFindingEnabled() const;
+	bool IsCameraLocationValidForAgent() const;
 	FReply OnValidateCameraVolumeClicked();
 	FReply OnFindCameraVolumeConnectionsClicked();
 	FReply OnResetNavMesh3DClicked();
 	FReply OnValidateNavMesh3DClicked();
+	float GetDebugLevel() const;
+	FText GetDebugLevelText() const;
+	void OnDebugLevelChanged(float InNewValue);
 	float GetDebugDrawTime() const;
 	FText GetDebugDrawTimeText() const;
 	void OnDebugDrawTimeChanged(float InNewValue);

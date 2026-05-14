@@ -80,6 +80,8 @@ public:
 	bool AddNavMeshVolume(NavMeshVolume& RefVolume);
 	void RemoveNavMeshVolume(uint64 InID);
 	bool ProcessNavMeshVolume(NavMeshVolume& RefVolume, bool InDrawDebug = false);
+	bool ProcessNavMeshVolumeInterior(NavMeshVolume& RefVolume, bool InDrawDebug = false);
+	void SplitAlongLongestAxis(NavMeshVolume& RefVolume, bool InDrawDebug, const FString& InActorName);
 	void ValidateEmbeddedBoundsVolumes();
 	bool ValidateNavMesh3D(NavMeshVolume* InVolume = nullptr);
 	void PruneNavMesh3D();
@@ -107,7 +109,7 @@ public:
 	int32 GetSolutionVolumesCount() const { return NavMeshSolutionMap.Num(); }
 	uint64 CalculateHash3D(const FVector& InVec) const;
 	NavMeshVolume* FindVolumeContainingLocation(const FVector& InLocation);
-	NavMeshVolume* FindClosestVolumeContainingLocation(int32 InAgentIndex, const FVector& InLocation, int32 InConnectivityID = 0);
+	NavMeshVolume* FindClosestVolumeContainingLocation(int32 InAgentIndex, const FVector& InLocation, int32 InConnectivityID = 0, bool bPaddedRadius = true);
 	bool PathFind(FPathSearchSpace& InSearchSpace);
 	void FindPathPostProcess(FPathSearchSpace& InSearchSpace);
 	void DebugFindPath(FVector InOrigin = InvalidLocation, FVector InDestination = InvalidLocation);
@@ -115,6 +117,10 @@ public:
 	TOptional<NavMeshVolume> FindGenerationVolumeContainingLocation(const FVector& InLocation, bool InRemoveFromProcessing);
 	TOptional<NavMeshVolume> FindClosestGenerationVolume(const FVector& InLocation, bool InRemoveFromProcessing);
 	TOptional<NavMeshVolume> PopNextProcessingVolume();
+	float GetProcessMinVolumeSize(const FBox& InBounds, const TWeakObjectPtr<ANavGen3DBoundsVolume>& InParent) const;
+	void DebugProcessSingleVolume(NavMeshVolume& InVolume, bool bDrawDebug);
+	void DebugUndoLastProcess();
+	bool HasDebugUndoState() const { return DebugUndoState.bIsValid; }
 
 	UPROPERTY()
 	ENavGen3DDrawMode DebugDrawMode = ENavGen3DDrawMode::None;
@@ -142,6 +148,11 @@ public:
 	uint64 DrawVolumeID = 0;
 
 	UPROPERTY()
+	int32 DebugLevel = 0;
+
+	bool bCameraLocationValidForAgent = false;
+
+	UPROPERTY()
 	float DebugDrawTime = 0.0f;
 
 	UPROPERTY()
@@ -165,6 +176,20 @@ public:
 	UWorld* FindWorld() const;
 
 private:
+	struct FDebugProcessUndoState
+	{
+		NavMeshVolume ProcessedVolume;
+		TMap<uint64, NavMeshVolume> SolutionMapSnapshot;
+		TMap<uint64, TArray<uint64>> SolutionByLocationSnapshot;
+		TMap<uint64, uint64> VolumeMap_X_Snapshot;
+		TMap<uint64, uint64> VolumeMap_Y_Snapshot;
+		TMap<uint64, uint64> VolumeMap_Z_Snapshot;
+		uint64 IDGeneratorSnapshot = 0;
+		int32 ProcessListCountBefore = 0;
+		bool bIsValid = false;
+	};
+	FDebugProcessUndoState DebugUndoState;
+
 	TWeakPtr<SNavGen3DWindow> NavGen3DWindowPtr;
 
 	inline static uint64 NavMeshVolumeIDGenerator = 0;

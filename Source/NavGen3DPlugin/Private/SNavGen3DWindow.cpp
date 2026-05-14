@@ -362,36 +362,81 @@ void SNavGen3DWindow::Construct(const FArguments& InArgs)
 						.AutoHeight()
 						.Padding(8.0f, 4.0f, 8.0f, 4.0f)
 						[
-							SNew(SHorizontalBox)
+							SNew(SVerticalBox)
 
-							+ SHorizontalBox::Slot()
-							.AutoWidth()
-							.VAlign(VAlign_Center)
+							+ SVerticalBox::Slot()
+							.AutoHeight()
 							[
-								SNew(STextBlock)
-								.Text(FText::FromString("Draw Time:  "))
-								.ColorAndOpacity(TextColor)
+								SNew(SHorizontalBox)
+
+								+ SHorizontalBox::Slot()
+								.AutoWidth()
+								.VAlign(VAlign_Center)
+								[
+									SNew(STextBlock)
+									.Text(FText::FromString("Debug Level:"))
+									.ColorAndOpacity(TextColor)
+								]
+
+								+ SHorizontalBox::Slot()
+								.FillWidth(1.0f)
+								.VAlign(VAlign_Center)
+								.Padding(8.0f, 0.0f, 0.0f, 0.0f)
+								[
+									SNew(SSlider)
+									.MinValue(0.0f)
+									.MaxValue(4.0f)
+									.StepSize(1.0f)
+									.Value(this, &SNavGen3DWindow::GetDebugLevel)
+									.OnValueChanged(this, &SNavGen3DWindow::OnDebugLevelChanged)
+								]
+
+								+ SHorizontalBox::Slot()
+								.AutoWidth()
+								.VAlign(VAlign_Center)
+								.Padding(8.0f, 0.0f, 0.0f, 0.0f)
+								[
+									SNew(STextBlock)
+									.Text(this, &SNavGen3DWindow::GetDebugLevelText)
+									.ColorAndOpacity(TextColor)
+								]
 							]
 
-							+ SHorizontalBox::Slot()
-							.FillWidth(1.0f)
-							.VAlign(VAlign_Center)
+							+ SVerticalBox::Slot()
+							.AutoHeight()
+							.Padding(0.0f, 4.0f, 0.0f, 0.0f)
 							[
-								SNew(SSlider)
-								.MinValue(0.0f)
-								.MaxValue(120.0f)
-								.Value(this, &SNavGen3DWindow::GetDebugDrawTime)
-								.OnValueChanged(this, &SNavGen3DWindow::OnDebugDrawTimeChanged)
-							]
+								SNew(SHorizontalBox)
 
-							+ SHorizontalBox::Slot()
-							.AutoWidth()
-							.VAlign(VAlign_Center)
-							.Padding(8.0f, 0.0f, 0.0f, 0.0f)
-							[
-								SNew(STextBlock)
-								.Text(this, &SNavGen3DWindow::GetDebugDrawTimeText)
-								.ColorAndOpacity(TextColor)
+								+ SHorizontalBox::Slot()
+								.AutoWidth()
+								.VAlign(VAlign_Center)
+								[
+									SNew(STextBlock)
+									.Text(FText::FromString("Draw Time:  "))
+									.ColorAndOpacity(TextColor)
+								]
+
+								+ SHorizontalBox::Slot()
+								.FillWidth(1.0f)
+								.VAlign(VAlign_Center)
+								[
+									SNew(SSlider)
+									.MinValue(0.0f)
+									.MaxValue(120.0f)
+									.Value(this, &SNavGen3DWindow::GetDebugDrawTime)
+									.OnValueChanged(this, &SNavGen3DWindow::OnDebugDrawTimeChanged)
+								]
+
+								+ SHorizontalBox::Slot()
+								.AutoWidth()
+								.VAlign(VAlign_Center)
+								.Padding(8.0f, 0.0f, 0.0f, 0.0f)
+								[
+									SNew(STextBlock)
+									.Text(this, &SNavGen3DWindow::GetDebugDrawTimeText)
+									.ColorAndOpacity(TextColor)
+								]
 							]
 						]
 
@@ -554,147 +599,164 @@ void SNavGen3DWindow::Construct(const FArguments& InArgs)
 								.Text(FText::FromString("Find Camera Volume Connections"))
 								.OnClicked(this, &SNavGen3DWindow::OnFindCameraVolumeConnectionsClicked)
 							]
+
+							+ SUniformGridPanel::Slot(0, 5)
+							[
+								SNew(SButton)
+								.Text(FText::FromString("Undo Last Process"))
+								.IsEnabled(this, &SNavGen3DWindow::IsUndoLastProcessEnabled)
+								.OnClicked(this, &SNavGen3DWindow::OnUndoLastProcessClicked)
+							]
 						]
 
 					]
 
 					+ SVerticalBox::Slot()
 					.AutoHeight()
-					.Padding(8.0f, 8.0f, 8.0f, 2.0f)
 					[
-						SNew(STextBlock)
-						.Text(FText::FromString("Path Finding (Debug)"))
-						.ColorAndOpacity(LabelColor)
-					]
+						SNew(SVerticalBox)
+						.IsEnabled(this, &SNavGen3DWindow::IsPathFindingEnabled)
 
-					+ SVerticalBox::Slot()
-					.AutoHeight()
-					.Padding(8.0f, 0.0f, 8.0f, 4.0f)
-					[
-						SNew(SSeparator)
-						.Orientation(Orient_Horizontal)
-					]
-
-					+ SVerticalBox::Slot()
-					.AutoHeight()
-					.Padding(8.0f, 4.0f, 8.0f, 4.0f)
-					[
-						SNew(SButton)
-						.Text(FText::FromString("Reset"))
-						.OnClicked(this, &SNavGen3DWindow::OnResetPathClicked)
-					]
-
-					+ SVerticalBox::Slot()
-					.AutoHeight()
-					.Padding(8.0f, 4.0f, 8.0f, 2.0f)
-					[
-						SNew(STextBlock)
-						.Text(FText::FromString("Set the Path Origin"))
-						.ColorAndOpacity(FSlateColor(FLinearColor(1.0f, 0.8f, 0.2f)))
-						.Visibility(this, &SNavGen3DWindow::GetPathOriginStatusVisibility)
-					]
-
-					+ SVerticalBox::Slot()
-					.AutoHeight()
-					.Padding(8.0f, 4.0f, 8.0f, 4.0f)
-					[
-						SNew(SHorizontalBox)
-						+ SHorizontalBox::Slot()
-						.AutoWidth()
-						.VAlign(VAlign_Center)
+						+ SVerticalBox::Slot()
+						.AutoHeight()
+						.Padding(8.0f, 8.0f, 8.0f, 2.0f)
 						[
 							SNew(STextBlock)
-							.Text(FText::FromString("Path Smoothing:  "))
-							.ColorAndOpacity(TextColor)
+							.Text(FText::FromString("Path Finding (Debug)"))
+							.ColorAndOpacity(LabelColor)
 						]
-						+ SHorizontalBox::Slot()
-						.AutoWidth()
-						.VAlign(VAlign_Center)
+
+						+ SVerticalBox::Slot()
+						.AutoHeight()
+						.Padding(8.0f, 0.0f, 8.0f, 4.0f)
 						[
-							SNew(SCheckBox)
-							.IsChecked(this, &SNavGen3DWindow::GetPathSmoothingState)
-							.OnCheckStateChanged(this, &SNavGen3DWindow::OnPathSmoothingChanged)
-						]
-					]
-
-					+ SVerticalBox::Slot()
-					.AutoHeight()
-					.Padding(8.0f, 4.0f, 8.0f, 4.0f)
-					[
-						SNew(SUniformGridPanel)
-						.SlotPadding(FMargin(0.0f, 4.0f, 0.0f, 0.0f))
-
-						+ SUniformGridPanel::Slot(0, 0)
-						[
-							SNew(SHorizontalBox)
-							+ SHorizontalBox::Slot()
-							.AutoWidth()
-							.VAlign(VAlign_Center)
-							[
-								SNew(SButton)
-								.Text(FText::FromString("Set PathOrigin"))
-								.OnClicked(this, &SNavGen3DWindow::OnSetPathOriginClicked)
-							]
-							+ SHorizontalBox::Slot()
-							.AutoWidth()
-							.VAlign(VAlign_Center)
-							.Padding(8.0f, 0.0f, 0.0f, 0.0f)
-							[
-								SNew(STextBlock)
-								.Text(this, &SNavGen3DWindow::GetDebugPathOriginText)
-								.ColorAndOpacity(TextColor)
-							]
+							SNew(SSeparator)
+							.Orientation(Orient_Horizontal)
 						]
 
-						+ SUniformGridPanel::Slot(0, 1)
-						[
-							SNew(SHorizontalBox)
-							+ SHorizontalBox::Slot()
-							.AutoWidth()
-							.VAlign(VAlign_Center)
-							[
-								SNew(SButton)
-								.Text(FText::FromString("Path To Camera"))
-								.OnClicked(this, &SNavGen3DWindow::OnPathToCameraClicked)
-							]
-							+ SHorizontalBox::Slot()
-							.AutoWidth()
-							.VAlign(VAlign_Center)
-							.Padding(8.0f, 0.0f, 0.0f, 0.0f)
-							[
-								SNew(STextBlock)
-								.Text(this, &SNavGen3DWindow::GetDebugPathDestinationText)
-								.ColorAndOpacity(TextColor)
-							]
-							+ SHorizontalBox::Slot()
-							.AutoWidth()
-							.VAlign(VAlign_Center)
-							.Padding(8.0f, 0.0f, 0.0f, 0.0f)
-							[
-								SNew(STextBlock)
-								.Text(FText::FromString("Continuous"))
-								.ColorAndOpacity(TextColor)
-							]
-							+ SHorizontalBox::Slot()
-							.AutoWidth()
-							.VAlign(VAlign_Center)
-							.Padding(4.0f, 0.0f, 0.0f, 0.0f)
-							[
-								SNew(SCheckBox)
-								.IsChecked_Lambda([]() -> ECheckBoxState {
-									if (const UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
-										return Subsystem->DebugRepathContinuous ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
-									return ECheckBoxState::Unchecked;
-								})
-								.OnCheckStateChanged(this, &SNavGen3DWindow::OnDebugRepathContinuousChanged)
-							]
-						]
-
-						+ SUniformGridPanel::Slot(0, 2)
+						+ SVerticalBox::Slot()
+						.AutoHeight()
+						.Padding(8.0f, 4.0f, 8.0f, 4.0f)
 						[
 							SNew(SButton)
-							.Text(FText::FromString("Re-Path With Validate"))
-							.OnClicked(this, &SNavGen3DWindow::OnRePathClicked)
+							.Text(FText::FromString("Reset"))
+							.OnClicked(this, &SNavGen3DWindow::OnResetPathClicked)
+						]
+
+						+ SVerticalBox::Slot()
+						.AutoHeight()
+						.Padding(8.0f, 4.0f, 8.0f, 2.0f)
+						[
+							SNew(STextBlock)
+							.Text(this, &SNavGen3DWindow::GetPathOriginStatusText)
+							.ColorAndOpacity(FSlateColor(FLinearColor(1.0f, 0.8f, 0.2f)))
+							.Visibility(this, &SNavGen3DWindow::GetPathOriginStatusVisibility)
+						]
+
+						+ SVerticalBox::Slot()
+						.AutoHeight()
+						.Padding(8.0f, 4.0f, 8.0f, 4.0f)
+						[
+							SNew(SHorizontalBox)
+							+ SHorizontalBox::Slot()
+							.AutoWidth()
+							.VAlign(VAlign_Center)
+							[
+								SNew(STextBlock)
+								.Text(FText::FromString("Path Smoothing:  "))
+								.ColorAndOpacity(TextColor)
+							]
+							+ SHorizontalBox::Slot()
+							.AutoWidth()
+							.VAlign(VAlign_Center)
+							[
+								SNew(SCheckBox)
+								.IsChecked(this, &SNavGen3DWindow::GetPathSmoothingState)
+								.OnCheckStateChanged(this, &SNavGen3DWindow::OnPathSmoothingChanged)
+							]
+						]
+
+						+ SVerticalBox::Slot()
+						.AutoHeight()
+						.Padding(8.0f, 4.0f, 8.0f, 4.0f)
+						[
+							SNew(SUniformGridPanel)
+							.SlotPadding(FMargin(0.0f, 4.0f, 0.0f, 0.0f))
+
+							+ SUniformGridPanel::Slot(0, 0)
+							[
+								SNew(SHorizontalBox)
+								+ SHorizontalBox::Slot()
+								.AutoWidth()
+								.VAlign(VAlign_Center)
+								[
+									SNew(SButton)
+									.Text(FText::FromString("Set PathOrigin"))
+									.IsEnabled(this, &SNavGen3DWindow::IsCameraLocationValidForAgent)
+									.OnClicked(this, &SNavGen3DWindow::OnSetPathOriginClicked)
+								]
+								+ SHorizontalBox::Slot()
+								.AutoWidth()
+								.VAlign(VAlign_Center)
+								.Padding(8.0f, 0.0f, 0.0f, 0.0f)
+								[
+									SNew(STextBlock)
+									.Text(this, &SNavGen3DWindow::GetDebugPathOriginText)
+									.ColorAndOpacity(TextColor)
+								]
+							]
+
+							+ SUniformGridPanel::Slot(0, 1)
+							[
+								SNew(SHorizontalBox)
+								+ SHorizontalBox::Slot()
+								.AutoWidth()
+								.VAlign(VAlign_Center)
+								[
+									SNew(SButton)
+									.Text(FText::FromString("Path To Camera"))
+									.IsEnabled(this, &SNavGen3DWindow::IsCameraLocationValidForAgent)
+									.OnClicked(this, &SNavGen3DWindow::OnPathToCameraClicked)
+								]
+								+ SHorizontalBox::Slot()
+								.AutoWidth()
+								.VAlign(VAlign_Center)
+								.Padding(8.0f, 0.0f, 0.0f, 0.0f)
+								[
+									SNew(STextBlock)
+									.Text(this, &SNavGen3DWindow::GetDebugPathDestinationText)
+									.ColorAndOpacity(TextColor)
+								]
+								+ SHorizontalBox::Slot()
+								.AutoWidth()
+								.VAlign(VAlign_Center)
+								.Padding(8.0f, 0.0f, 0.0f, 0.0f)
+								[
+									SNew(STextBlock)
+									.Text(FText::FromString("Continuous"))
+									.ColorAndOpacity(TextColor)
+								]
+								+ SHorizontalBox::Slot()
+								.AutoWidth()
+								.VAlign(VAlign_Center)
+								.Padding(4.0f, 0.0f, 0.0f, 0.0f)
+								[
+									SNew(SCheckBox)
+									.IsChecked_Lambda([]() -> ECheckBoxState {
+										if (const UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
+											return Subsystem->DebugRepathContinuous ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+										return ECheckBoxState::Unchecked;
+									})
+									.OnCheckStateChanged(this, &SNavGen3DWindow::OnDebugRepathContinuousChanged)
+								]
+							]
+
+							+ SUniformGridPanel::Slot(0, 2)
+							[
+								SNew(SButton)
+								.Text(FText::FromString("Re-Path With Validate"))
+								.OnClicked(this, &SNavGen3DWindow::OnRePathClicked)
+							]
 						]
 					]
 
@@ -834,6 +896,32 @@ void SNavGen3DWindow::AddLogEntry(ENavGen3DLogCategory InCategory, const FString
 {
 	LogEntries.Add(MakeShared<FNavGen3DLogEntry>(InCategory, InActorName, InMessage));
 	RefreshFilteredLog();
+}
+
+float SNavGen3DWindow::GetDebugLevel() const
+{
+	if (const UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
+	{
+		return (float)Subsystem->DebugLevel;
+	}
+	return 0.0f;
+}
+
+FText SNavGen3DWindow::GetDebugLevelText() const
+{
+	if (const UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
+	{
+		return FText::FromString(FString::Printf(TEXT("%d"), Subsystem->DebugLevel));
+	}
+	return FText::FromString(TEXT("0"));
+}
+
+void SNavGen3DWindow::OnDebugLevelChanged(float InNewValue)
+{
+	if (UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
+	{
+		Subsystem->DebugLevel = FMath::RoundToInt(InNewValue);
+	}
 }
 
 float SNavGen3DWindow::GetDebugDrawTime() const
@@ -1194,9 +1282,25 @@ EVisibility SNavGen3DWindow::GetPathOriginStatusVisibility() const
 {
 	if (const UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
 	{
+		if (Subsystem->DebugLevel == 0)
+		{
+			return EVisibility::Visible;
+		}
 		return Subsystem->DebugPathOrigin == UNavGen3DSubsystem::InvalidLocation ? EVisibility::Visible : EVisibility::Collapsed;
 	}
 	return EVisibility::Visible;
+}
+
+FText SNavGen3DWindow::GetPathOriginStatusText() const
+{
+	if (const UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
+	{
+		if (Subsystem->DebugLevel == 0)
+		{
+			return FText::FromString("Set the Debug Level >= 1");
+		}
+	}
+	return FText::FromString("Set the Path Origin");
 }
 
 FReply SNavGen3DWindow::OnResetPathClicked()
@@ -1214,7 +1318,19 @@ FReply SNavGen3DWindow::OnSetPathOriginClicked()
 {
 	if (UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
 	{
-		Subsystem->DebugPathOrigin = Subsystem->GetCameraLocation();
+		const FVector CameraLocation = Subsystem->GetCameraLocation();
+		if (UWorld* World = Subsystem->FindWorld())
+		{
+			const float UnpaddedRadius = Subsystem->GetAgentCollisionRadius(Subsystem->DebugNavMeshAgentIndex, false);
+			const FCollisionShape Sphere = FCollisionShape::MakeSphere(UnpaddedRadius);
+			if (World->OverlapBlockingTestByChannel(CameraLocation, FQuat::Identity, ECC_WorldStatic, Sphere))
+			{
+				Subsystem->AddLogMessage(ENavGen3DLogCategory::Warning, TEXT(""), TEXT("Invalid Path Origin"));
+				Subsystem->DebugPathOrigin = UNavGen3DSubsystem::InvalidLocation;
+				return FReply::Handled();
+			}
+		}
+		Subsystem->DebugPathOrigin = CameraLocation;
 	}
 	return FReply::Handled();
 }
@@ -1325,7 +1441,7 @@ FReply SNavGen3DWindow::OnProcessNextVolumeClicked()
 		}
 		if (NextVolume.IsSet())
 		{
-			Subsystem->ProcessNavMeshVolume(NextVolume.GetValue(), true);
+			Subsystem->DebugProcessSingleVolume(NextVolume.GetValue(), true);
 		}
 	}
 	return FReply::Handled();
@@ -1353,10 +1469,46 @@ FReply SNavGen3DWindow::OnProcessCameraVolumeClicked()
 		}
 		if (GenVolume.IsSet())
 		{
-			Subsystem->ProcessNavMeshVolume(GenVolume.GetValue(), true);
+			Subsystem->DebugProcessSingleVolume(GenVolume.GetValue(), true);
 		}
 	}
 	return FReply::Handled();
+}
+
+FReply SNavGen3DWindow::OnUndoLastProcessClicked()
+{
+	if (UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
+	{
+		Subsystem->DebugUndoLastProcess();
+	}
+	return FReply::Handled();
+}
+
+bool SNavGen3DWindow::IsUndoLastProcessEnabled() const
+{
+	if (const UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
+	{
+		return Subsystem->HasDebugUndoState();
+	}
+	return false;
+}
+
+bool SNavGen3DWindow::IsPathFindingEnabled() const
+{
+	if (const UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
+	{
+		return Subsystem->DebugLevel >= 1;
+	}
+	return false;
+}
+
+bool SNavGen3DWindow::IsCameraLocationValidForAgent() const
+{
+	if (const UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
+	{
+		return Subsystem->bCameraLocationValidForAgent;
+	}
+	return false;
 }
 
 FReply SNavGen3DWindow::OnValidateCameraVolumeClicked()
