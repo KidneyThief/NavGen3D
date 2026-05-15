@@ -19,24 +19,73 @@ void UNavGen3DSubsystem::Initialize(FSubsystemCollectionBase& InCollection)
 {
 	Super::Initialize(InCollection);
 	FCoreDelegates::OnEndFrame.AddUObject(this, &UNavGen3DSubsystem::OnEndFrame);
+#if WITH_EDITOR
+	FEditorDelegates::MapChange.AddUObject(this, &UNavGen3DSubsystem::OnMapChanged);
+	FEditorDelegates::PreBeginPIE.AddUObject(this, &UNavGen3DSubsystem::OnBeginPIE);
+	FEditorDelegates::EndPIE.AddUObject(this, &UNavGen3DSubsystem::OnEndPIE);
+#endif
 }
 
 void UNavGen3DSubsystem::Deinitialize()
 {
 	FCoreDelegates::OnEndFrame.RemoveAll(this);
+#if WITH_EDITOR
+	FEditorDelegates::MapChange.RemoveAll(this);
+	FEditorDelegates::PreBeginPIE.RemoveAll(this);
+	FEditorDelegates::EndPIE.RemoveAll(this);
+#endif
 	Super::Deinitialize();
 }
 
+#if WITH_EDITOR
+void UNavGen3DSubsystem::OnMapChanged(uint32 InMapChangeFlags)
+{
+	if (InMapChangeFlags & MapChangeEventFlags::WorldTornDown)
+	{
+		// Drop strong references to level actors so GC can collect the old world
+		BoundsVolumes.Reset();
+		NavMeshSolutionMap.Reset();
+		NavMeshSolutionMapByLocation.Reset();
+		ProcessVolumesList.Reset();
+		NavMeshVolumeMap_X.Reset();
+		NavMeshVolumeMap_Y.Reset();
+		NavMeshVolumeMap_Z.Reset();
+		NavVolumeConnectionMap.Reset();
+		NavMeshVolumeIDGenerator = 0;
+		DebugPathSearchSpace.Reset();
+		return;
+	}
+	InitializeNavMesh3D();
+}
+
+void UNavGen3DSubsystem::OnBeginPIE(bool bIsSimulating)
+{
+	InitializeNavMesh3D();
+}
+
+void UNavGen3DSubsystem::OnEndPIE(bool bIsSimulating)
+{
+	InitializeNavMesh3D();
+}
+#endif
+
 UWorld* UNavGen3DSubsystem::FindWorld() const
 {
+	UWorld* EditorWorld = nullptr;
 	for (const FWorldContext& WorldContext : GEngine->GetWorldContexts())
 	{
-		if (WorldContext.World())
+		UWorld* World = WorldContext.World();
+		if (!World) continue;
+		if (World->WorldType == EWorldType::PIE || World->WorldType == EWorldType::Game)
 		{
-			return WorldContext.World();
+			return World;
+		}
+		if (World->WorldType == EWorldType::Editor)
+		{
+			EditorWorld = World;
 		}
 	}
-	return nullptr;
+	return EditorWorld;
 }
 
 FVector UNavGen3DSubsystem::GetCameraLocation()
@@ -79,21 +128,21 @@ bool UNavGen3DSubsystem::GenerateNavMesh3DConnections(int32 InAgentIndex)
 	{
 		FindNavMeshVolumeConnections(InAgentIndex, Sphere, Pair.Value);
 
-		TMap<uint64, TArray<NavVolumeConnection>>& AgentMap = NavVolumeConnectionMap.FindOrAdd(InAgentIndex);
-		if (const TArray<NavVolumeConnection>* ConnectionsPtr = AgentMap.Find(Pair.Key))
+		TMap<uint64, TArray<FNavVolumeConnection>>& AgentMap = NavVolumeConnectionMap.FindOrAdd(InAgentIndex);
+		if (const TArray<FNavVolumeConnection>* ConnectionsPtr = AgentMap.Find(Pair.Key))
 		{
-			const TArray<NavVolumeConnection> Connections = *ConnectionsPtr;
-			for (const NavVolumeConnection& Conn : Connections)
+			const TArray<FNavVolumeConnection> Connections = *ConnectionsPtr;
+			for (const FNavVolumeConnection& Conn : Connections)
 			{
-				TArray<NavVolumeConnection>& NeighborConns = AgentMap.FindOrAdd(Conn.ID);
+				TArray<FNavVolumeConnection>& NeighborConns = AgentMap.FindOrAdd(Conn.ID);
 				bool bAlreadyMirrored = false;
-				for (const NavVolumeConnection& NC : NeighborConns)
+				for (const FNavVolumeConnection& NC : NeighborConns)
 				{
 					if (NC.ID == Pair.Key) { bAlreadyMirrored = true; break; }
 				}
 				if (!bAlreadyMirrored)
 				{
-					NavVolumeConnection Reverse;
+					FNavVolumeConnection Reverse;
 					Reverse.ID = Pair.Key;
 					Reverse.Location = Conn.Location;
 					Reverse.ConnectionAxis = -Conn.ConnectionAxis;
@@ -115,12 +164,12 @@ NavMeshVolume* UNavGen3DSubsystem::FindNavMeshVolumeByID(uint64 InID)
 
 void UNavGen3DSubsystem::FindNavMeshVolumeConnections(int32 InAgentIndex, const FCollisionShape& InSphere, const NavMeshVolume& InSourceVolume)
 {
-	TArray<NavVolumeConnection>& Connections = NavVolumeConnectionMap.FindOrAdd(InAgentIndex).FindOrAdd(InSourceVolume.ID);
+	TArray<FNavVolumeConnection>& Connections = NavVolumeConnectionMap.FindOrAdd(InAgentIndex).FindOrAdd(InSourceVolume.ID);
 
 	const float Stride = (float)GetDefault<UNavGen3DSettings>()->MaxVolumeSize;
 	const FVector Center = InSourceVolume.Bounds.GetCenter();
 	TSet<uint64> FoundIDs;
-	for (const NavVolumeConnection& Existing : Connections)
+	for (const FNavVolumeConnection& Existing : Connections)
 	{
 		FoundIDs.Add(Existing.ID);
 	}
@@ -143,7 +192,7 @@ void UNavGen3DSubsystem::FindNavMeshVolumeConnections(int32 InAgentIndex, const 
 				if (FindNavMeshVolumeConnection(InAgentIndex, InSphere, InSourceVolume, *Curr, InSortAxis, Location, ConnAxis))
 				{
 					FoundIDs.Add(Curr->ID);
-					NavVolumeConnection Conn;
+					FNavVolumeConnection Conn;
 					Conn.ID = Curr->ID;
 					Conn.Location = Location;
 					Conn.ConnectionAxis = ConnAxis;
@@ -171,9 +220,9 @@ void UNavGen3DSubsystem::FindNavMeshVolumeConnections(int32 InAgentIndex, const 
 	}
 }
 
-const TArray<NavVolumeConnection>* UNavGen3DSubsystem::GetVolumeConnections(int32 InAgentIndex, uint64 InVolumeID) const
+const TArray<FNavVolumeConnection>* UNavGen3DSubsystem::GetVolumeConnections(int32 InAgentIndex, uint64 InVolumeID) const
 {
-	if (const TMap<uint64, TArray<NavVolumeConnection>>* AgentMap = NavVolumeConnectionMap.Find(InAgentIndex))
+	if (const TMap<uint64, TArray<FNavVolumeConnection>>* AgentMap = NavVolumeConnectionMap.Find(InAgentIndex))
 	{
 		return AgentMap->Find(InVolumeID);
 	}
@@ -260,12 +309,12 @@ bool UNavGen3DSubsystem::IsPlayMode()
 
 void UNavGen3DSubsystem::AddBoundsVolume(ANavGen3DBoundsVolume* InVolume)
 {
-	BoundsVolumes.AddUnique(InVolume);
+	BoundsVolumes.AddUnique(TWeakObjectPtr<ANavGen3DBoundsVolume>(InVolume));
 }
 
 void UNavGen3DSubsystem::RemoveBoundsVolume(ANavGen3DBoundsVolume* InVolume)
 {
-	BoundsVolumes.Remove(InVolume);
+	BoundsVolumes.RemoveAll([InVolume](const TWeakObjectPtr<ANavGen3DBoundsVolume>& V) { return V.Get() == InVolume; });
 }
 
 void UNavGen3DSubsystem::SetNavGen3DWindow(TSharedPtr<SNavGen3DWindow> InWindow)
@@ -517,11 +566,96 @@ bool UNavGen3DSubsystem::AddNavMeshVolume(NavMeshVolume& RefVolume)
 	return true;
 }
 
+void UNavGen3DSubsystem::AddGeneratedVolumeToSolution(const FNavGen3DGeneratedVolume& InGeneratedVolume, ANavGen3DBoundsVolume* InParent)
+{
+	NavMeshVolume Volume;
+	Volume.ID     = InGeneratedVolume.ID;
+	Volume.Bounds = FBox(InGeneratedVolume.BoundsMin, InGeneratedVolume.BoundsMax);
+	Volume.ParentBoundsVolume = InParent;
+
+	for (int32 AgentIndex = 0; AgentIndex < InGeneratedVolume.ConnectivityIDs.Num(); ++AgentIndex)
+	{
+		const int32 ConnID = InGeneratedVolume.ConnectivityIDs[AgentIndex];
+		if (ConnID != 0)
+		{
+			Volume.ConnectivityIDByAgent.Add(AgentIndex, ConnID);
+		}
+	}
+
+	NavMeshVolumeIDGenerator = FMath::Max(NavMeshVolumeIDGenerator, Volume.ID);
+	NavMeshSolutionMap.Add(Volume.ID, Volume);
+	NavMeshVolume* Stored = NavMeshSolutionMap.Find(Volume.ID);
+
+	const uint64 LocationHash = CalculateHash3D(Stored->Bounds.GetCenter());
+	NavMeshSolutionMapByLocation.FindOrAdd(LocationHash).Add(Volume.ID);
+
+	const FVector Center = Stored->Bounds.GetCenter();
+
+	// X bucket — sorted by Min.X
+	{
+		const uint64 Hash = CalculateHash3D(FVector(0.0f, Center.Y, Center.Z));
+		uint64& HeadID = NavMeshVolumeMap_X.FindOrAdd(Hash, 0);
+		uint64* CurrID = &HeadID;
+		while (*CurrID != 0)
+		{
+			NavMeshVolume* CurrVol = NavMeshSolutionMap.Find(*CurrID);
+			if (!CurrVol || CurrVol->Bounds.Min.X >= Stored->Bounds.Min.X) break;
+			CurrID = &CurrVol->Next_X;
+		}
+		Stored->Next_X = *CurrID;
+		*CurrID = Stored->ID;
+	}
+
+	// Y bucket — sorted by Min.Y
+	{
+		const uint64 Hash = CalculateHash3D(FVector(Center.X, 0.0f, Center.Z));
+		uint64& HeadID = NavMeshVolumeMap_Y.FindOrAdd(Hash, 0);
+		uint64* CurrID = &HeadID;
+		while (*CurrID != 0)
+		{
+			NavMeshVolume* CurrVol = NavMeshSolutionMap.Find(*CurrID);
+			if (!CurrVol || CurrVol->Bounds.Min.Y >= Stored->Bounds.Min.Y) break;
+			CurrID = &CurrVol->Next_Y;
+		}
+		Stored->Next_Y = *CurrID;
+		*CurrID = Stored->ID;
+	}
+
+	// Z bucket — sorted by Min.Z
+	{
+		const uint64 Hash = CalculateHash3D(FVector(Center.X, Center.Y, 0.0f));
+		uint64& HeadID = NavMeshVolumeMap_Z.FindOrAdd(Hash, 0);
+		uint64* CurrID = &HeadID;
+		while (*CurrID != 0)
+		{
+			NavMeshVolume* CurrVol = NavMeshSolutionMap.Find(*CurrID);
+			if (!CurrVol || CurrVol->Bounds.Min.Z >= Stored->Bounds.Min.Z) break;
+			CurrID = &CurrVol->Next_Z;
+		}
+		Stored->Next_Z = *CurrID;
+		*CurrID = Stored->ID;
+	}
+
+	for (const auto& ConnPair : InGeneratedVolume.Connections)
+	{
+		TArray<FNavVolumeConnection>& RuntimeConns = NavVolumeConnectionMap.FindOrAdd(ConnPair.Key).FindOrAdd(Volume.ID);
+		RuntimeConns.Reserve(ConnPair.Value.Connections.Num());
+		for (const FNavGen3DStoredConnection& S : ConnPair.Value.Connections)
+		{
+			FNavVolumeConnection& C = RuntimeConns.AddDefaulted_GetRef();
+			C.ID             = S.ID;
+			C.Location       = S.Location;
+			C.ConnectionAxis = S.ConnectionAxis;
+		}
+	}
+}
+
 float UNavGen3DSubsystem::GetProcessMinVolumeSize(const FBox& InBounds, const TWeakObjectPtr<ANavGen3DBoundsVolume>& InParent) const
 {
 	float MinVolumeSize = InParent.IsValid() ? InParent->MinVolumeSize : 0.0f;
-	for (const TObjectPtr<ANavGen3DBoundsVolume>& EmbeddedVolume : BoundsVolumes)
+	for (const TWeakObjectPtr<ANavGen3DBoundsVolume>& WeakVol : BoundsVolumes)
 	{
+		ANavGen3DBoundsVolume* EmbeddedVolume = WeakVol.Get();
 		if (!EmbeddedVolume || !EmbeddedVolume->Embedded || !EmbeddedVolume->Enabled) continue;
 		FVector EmbeddedOrigin, EmbeddedExtent;
 		EmbeddedVolume->GetActorBounds(false, EmbeddedOrigin, EmbeddedExtent);
@@ -916,7 +1050,7 @@ NavMeshVolume* UNavGen3DSubsystem::FindClosestVolumeContainingLocation(int32 InA
 {
 	const FCollisionShape Sphere = FCollisionShape::MakeSphere(GetAgentCollisionRadius(InAgentIndex, bPaddedRadius));
 
-	const TMap<uint64, TArray<NavVolumeConnection>>* AgentMap = NavVolumeConnectionMap.Find(InAgentIndex);
+	const TMap<uint64, TArray<FNavVolumeConnection>>* AgentMap = NavVolumeConnectionMap.Find(InAgentIndex);
 	UWorld* World = FindWorld();
 
 	const float MaxDist = (float)GetDefault<UNavGen3DSettings>()->MaxVolumeSize;
@@ -980,7 +1114,7 @@ bool UNavGen3DSubsystem::PathFind(FPathSearchSpace& InSearchSpace)
 	InSearchSpace.PathVolumeIDs.Reset();
 	InSearchSpace.PathConnectionAxes.Reset();
 
-	const TMap<uint64, TArray<NavVolumeConnection>>* AgentMap = NavVolumeConnectionMap.Find(InSearchSpace.AgentIndex);
+	const TMap<uint64, TArray<FNavVolumeConnection>>* AgentMap = NavVolumeConnectionMap.Find(InSearchSpace.AgentIndex);
 	if (!AgentMap)
 	{
 		InSearchSpace.Status = EPathSearchStatus::Fail;
@@ -1071,7 +1205,7 @@ bool UNavGen3DSubsystem::PathFind(FPathSearchSpace& InSearchSpace)
 			return true;
 		}
 
-		const TArray<NavVolumeConnection>* Connections = AgentMap->Find(CurrentID);
+		const TArray<FNavVolumeConnection>* Connections = AgentMap->Find(CurrentID);
 		if (!Connections) continue;
 
 		const NavMeshVolume* CurrentVolume = NavMeshSolutionMap.Find(CurrentID);
@@ -1079,7 +1213,7 @@ bool UNavGen3DSubsystem::PathFind(FPathSearchSpace& InSearchSpace)
 
 		const float CurrentGCost = GCost.FindRef(CurrentID);
 
-		for (const NavVolumeConnection& Conn : *Connections)
+		for (const FNavVolumeConnection& Conn : *Connections)
 		{
 			const uint64 NeighborID = Conn.ID;
 			if (ClosedSet.Contains(NeighborID)) continue;
@@ -1656,7 +1790,7 @@ bool UNavGen3DSubsystem::GenerateNavMesh3D(NavMeshVolume* InVolume)
 			for (int32 AgentIndex = 0; AgentIndex < AgentCount; ++AgentIndex)
 			{
 				const FCollisionShape Sphere = FCollisionShape::MakeSphere(GetAgentCollisionRadius(AgentIndex, true));
-				if (TMap<uint64, TArray<NavVolumeConnection>>* AgentMap = NavVolumeConnectionMap.Find(AgentIndex))
+				if (TMap<uint64, TArray<FNavVolumeConnection>>* AgentMap = NavVolumeConnectionMap.Find(AgentIndex))
 				{
 					AgentMap->Remove(InVolume->ID);
 				}
@@ -1774,9 +1908,9 @@ bool UNavGen3DSubsystem::ValidateNavMesh3D(NavMeshVolume* InVolume)
 
 	{
 		const FCollisionShape Sphere = FCollisionShape::MakeSphere(GetAgentCollisionRadius(DebugNavMeshAgentIndex, true));
-		if (const TArray<NavVolumeConnection>* Connections = GetVolumeConnections(DebugNavMeshAgentIndex, InVolume->ID))
+		if (const TArray<FNavVolumeConnection>* Connections = GetVolumeConnections(DebugNavMeshAgentIndex, InVolume->ID))
 		{
-			for (const NavVolumeConnection& Conn : *Connections)
+			for (const FNavVolumeConnection& Conn : *Connections)
 			{
 				const NavMeshVolume* NeighborVol = NavMeshSolutionMap.Find(Conn.ID);
 				if (!NeighborVol) continue;
@@ -1812,7 +1946,7 @@ void UNavGen3DSubsystem::PruneNavMesh3D()
 
 		for (const auto& AgentPair : NavVolumeConnectionMap)
 		{
-			const TArray<NavVolumeConnection>* Connections = AgentPair.Value.Find(VolumeID);
+			const TArray<FNavVolumeConnection>* Connections = AgentPair.Value.Find(VolumeID);
 			if (Connections && Connections->Num() > 0)
 			{
 				bHasConnections = true;
@@ -1863,7 +1997,7 @@ void UNavGen3DSubsystem::DetermineConnectivity()
 	const int32 AgentCount = GetSupportedAgentCount();
 	for (int32 AgentIndex = 0; AgentIndex < AgentCount; ++AgentIndex)
 	{
-		const TMap<uint64, TArray<NavVolumeConnection>>* AgentConnectionMap = NavVolumeConnectionMap.Find(AgentIndex);
+		const TMap<uint64, TArray<FNavVolumeConnection>>* AgentConnectionMap = NavVolumeConnectionMap.Find(AgentIndex);
 		if (!AgentConnectionMap) continue;
 
 		int32 CurrentConnectivityID = 1;
@@ -1873,7 +2007,7 @@ void UNavGen3DSubsystem::DetermineConnectivity()
 			uint64 SeedVolumeID = 0;
 			for (const auto& Pair : NavMeshSolutionMap)
 			{
-				const TArray<NavVolumeConnection>* Connections = AgentConnectionMap->Find(Pair.Key);
+				const TArray<FNavVolumeConnection>* Connections = AgentConnectionMap->Find(Pair.Key);
 				if (Connections && Connections->Num() > 0 && !Pair.Value.ConnectivityIDByAgent.Contains(AgentIndex))
 				{
 					SeedVolumeID = Pair.Key;
@@ -1895,10 +2029,10 @@ void UNavGen3DSubsystem::DetermineConnectivity()
 
 				CurrentVolume->ConnectivityIDByAgent.Add(AgentIndex, CurrentConnectivityID);
 
-				const TArray<NavVolumeConnection>* Connections = AgentConnectionMap->Find(CurrentID);
+				const TArray<FNavVolumeConnection>* Connections = AgentConnectionMap->Find(CurrentID);
 				if (Connections)
 				{
-					for (const NavVolumeConnection& Connection : *Connections)
+					for (const FNavVolumeConnection& Connection : *Connections)
 					{
 						NavMeshVolume* Neighbor = NavMeshSolutionMap.Find(Connection.ID);
 						if (Neighbor && !Neighbor->ConnectivityIDByAgent.Contains(AgentIndex))
@@ -1921,11 +2055,11 @@ void UNavGen3DSubsystem::ValidateEmbeddedBoundsVolumes()
 		return;
 	}
 
-	TArray<TObjectPtr<ANavGen3DBoundsVolume>> Volumes = GetBoundsVolumes();
+	TArray<ANavGen3DBoundsVolume*> Volumes = GetBoundsVolumes();
 
 	for (ANavGen3DBoundsVolume* Volume : Volumes)
 	{
-		if (!Volume || !Volume->Enabled)
+		if (!IsValid(Volume) || !Volume->Enabled)
 		{
 			continue;
 		}
@@ -1935,7 +2069,7 @@ void UNavGen3DSubsystem::ValidateEmbeddedBoundsVolumes()
 
 		for (ANavGen3DBoundsVolume* OtherVolume : Volumes)
 		{
-			if (!OtherVolume || !OtherVolume->Enabled || OtherVolume == Volume)
+			if (!IsValid(OtherVolume) || !OtherVolume->Enabled || OtherVolume == Volume)
 			{
 				continue;
 			}
@@ -1953,25 +2087,36 @@ void UNavGen3DSubsystem::ValidateEmbeddedBoundsVolumes()
 	}
 }
 
-TArray<TObjectPtr<ANavGen3DBoundsVolume>> UNavGen3DSubsystem::GetBoundsVolumes()
+TArray<ANavGen3DBoundsVolume*> UNavGen3DSubsystem::GetBoundsVolumes()
 {
+	TArray<ANavGen3DBoundsVolume*> Result;
+
 	if (IsPlayMode())
 	{
-		return BoundsVolumes;
+		for (const TWeakObjectPtr<ANavGen3DBoundsVolume>& WeakVol : BoundsVolumes)
+		{
+			if (ANavGen3DBoundsVolume* Vol = WeakVol.Get())
+			{
+				Result.Add(Vol);
+			}
+		}
+		return Result;
 	}
 
-	TArray<TObjectPtr<ANavGen3DBoundsVolume>> Result;
 	for (const FWorldContext& WorldContext : GEngine->GetWorldContexts())
 	{
 		UWorld* World = WorldContext.World();
-		if (!World)
+		if (!IsValid(World))
 		{
 			continue;
 		}
 
 		for (TActorIterator<ANavGen3DBoundsVolume> It(World); It; ++It)
 		{
-			Result.Add(*It);
+			if (IsValid(*It))
+			{
+				Result.Add(*It);
+			}
 		}
 	}
 	return Result;
@@ -2000,8 +2145,9 @@ void UNavGen3DSubsystem::OnEndFrame()
 				break;
 			}
 
-			for (const TObjectPtr<ANavGen3DBoundsVolume>& Volume : BoundsVolumes)
+			for (const TWeakObjectPtr<ANavGen3DBoundsVolume>& WeakVol : BoundsVolumes)
 			{
+				ANavGen3DBoundsVolume* Volume = WeakVol.Get();
 				if (!Volume)
 				{
 					continue;
@@ -2033,7 +2179,7 @@ void UNavGen3DSubsystem::OnEndFrame()
 		{
 			if (World)
 			{
-				const TMap<uint64, TArray<NavVolumeConnection>>* AgentConnections =
+				const TMap<uint64, TArray<FNavVolumeConnection>>* AgentConnections =
 					DebugDrawConnections ? NavVolumeConnectionMap.Find(DebugNavMeshAgentIndex) : nullptr;
 
 				static const TArray<FColor> VolumeColors = {
@@ -2067,9 +2213,9 @@ void UNavGen3DSubsystem::OnEndFrame()
 
 					if (AgentConnections)
 					{
-						if (const TArray<NavVolumeConnection>* Connections = AgentConnections->Find(Volume.ID))
+						if (const TArray<FNavVolumeConnection>* Connections = AgentConnections->Find(Volume.ID))
 						{
-							for (const NavVolumeConnection& Conn : *Connections)
+							for (const FNavVolumeConnection& Conn : *Connections)
 							{
 								DrawDebugSphere(World, Conn.Location, 5.0f, 9, FColor::Orange, false, DrawTime);
 							}
@@ -2102,11 +2248,11 @@ void UNavGen3DSubsystem::OnEndFrame()
 		{
 			DrawDebugBox(World, Volume->Bounds.GetCenter(), Volume->Bounds.GetExtent(), FColor::White, false, DrawTime, 0, 5.0f);
 
-			if (const TMap<uint64, TArray<NavVolumeConnection>>* AgentConnections = NavVolumeConnectionMap.Find(DebugNavMeshAgentIndex))
+			if (const TMap<uint64, TArray<FNavVolumeConnection>>* AgentConnections = NavVolumeConnectionMap.Find(DebugNavMeshAgentIndex))
 			{
-				if (const TArray<NavVolumeConnection>* Connections = AgentConnections->Find(Volume->ID))
+				if (const TArray<FNavVolumeConnection>* Connections = AgentConnections->Find(Volume->ID))
 				{
-					for (const NavVolumeConnection& Conn : *Connections)
+					for (const FNavVolumeConnection& Conn : *Connections)
 					{
 						DrawDebugSphere(World, Conn.Location, 5.0f, 9, FColor::Orange, false, DrawTime);
 					}
@@ -2123,11 +2269,11 @@ void UNavGen3DSubsystem::OnEndFrame()
 		{
 			DrawDebugBox(World, Volume->Bounds.GetCenter(), Volume->Bounds.GetExtent(), FColor::Green, false, DrawTime, 0, 5.0f);
 
-			if (const TMap<uint64, TArray<NavVolumeConnection>>* AgentConnections = NavVolumeConnectionMap.Find(DebugNavMeshAgentIndex))
+			if (const TMap<uint64, TArray<FNavVolumeConnection>>* AgentConnections = NavVolumeConnectionMap.Find(DebugNavMeshAgentIndex))
 			{
-				if (const TArray<NavVolumeConnection>* Connections = AgentConnections->Find(Volume->ID))
+				if (const TArray<FNavVolumeConnection>* Connections = AgentConnections->Find(Volume->ID))
 				{
-					for (const NavVolumeConnection& Conn : *Connections)
+					for (const FNavVolumeConnection& Conn : *Connections)
 					{
 						DrawDebugSphere(World, Conn.Location, 5.0f, 9, FColor::Orange, false, DrawTime);
 					}

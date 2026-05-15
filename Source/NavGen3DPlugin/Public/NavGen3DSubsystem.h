@@ -6,6 +6,7 @@
 #include "Engine/EngineTypes.h"
 #include "Subsystems/EngineSubsystem.h"
 #include "NavGen3DBoundsVolume.h"
+#include "NavGen3DBoundsVolumeAsset.h"
 #include "NavGen3DLog.h"
 #include "NavMeshVolume.h"
 #include "NavGen3DSubsystem.generated.h"
@@ -69,7 +70,7 @@ public:
 
 	void OnEndFrame();
 
-	TArray<TObjectPtr<ANavGen3DBoundsVolume>> GetBoundsVolumes();
+	TArray<ANavGen3DBoundsVolume*> GetBoundsVolumes();
 	void AddBoundsVolume(ANavGen3DBoundsVolume* InVolume);
 	void RemoveBoundsVolume(ANavGen3DBoundsVolume* InVolume);
 	void InitializeNavMesh3D();
@@ -98,15 +99,19 @@ public:
 	NavMeshVolume* FindNavMeshVolumeByID(uint64 InID);
 	void FindNavMeshVolumeConnections(int32 InAgentIndex, const FCollisionShape& InSphere, const NavMeshVolume& InSourceVolume);
 	bool FindNavMeshVolumeConnection(int32 InAgentIndex, const FCollisionShape& InSphere, const NavMeshVolume& InSourceVolume, const NavMeshVolume& InNeighborVolume, int32 InAxis, FVector& OutLocation, int32& OutConnectionAxis);
-	const TArray<NavVolumeConnection>* GetVolumeConnections(int32 InAgentIndex, uint64 InVolumeID) const;
+	const TArray<FNavVolumeConnection>* GetVolumeConnections(int32 InAgentIndex, uint64 InVolumeID) const;
 
 	static inline FString FVectorToString(const FVector& InVec)
 	{
 		return FString::Printf(TEXT("%.2f, %.2f, %.2f"), InVec.X, InVec.Y, InVec.Z);
 	}
 	inline static FVector InvalidLocation = FVector(FLT_MAX);
+	inline static uint64 NavMeshAssetVersion = 1;
 	int32 GetProcessVolumesCount() const { return ProcessVolumesList.Num(); }
 	int32 GetSolutionVolumesCount() const { return NavMeshSolutionMap.Num(); }
+	const TMap<uint64, NavMeshVolume>& GetNavMeshSolutionMap() const { return NavMeshSolutionMap; }
+	const TMap<int32, TMap<uint64, TArray<FNavVolumeConnection>>>& GetNavVolumeConnectionMap() const { return NavVolumeConnectionMap; }
+	void AddGeneratedVolumeToSolution(const FNavGen3DGeneratedVolume& InGeneratedVolume, ANavGen3DBoundsVolume* InParent);
 	uint64 CalculateHash3D(const FVector& InVec) const;
 	NavMeshVolume* FindVolumeContainingLocation(const FVector& InLocation);
 	NavMeshVolume* FindClosestVolumeContainingLocation(int32 InAgentIndex, const FVector& InLocation, int32 InConnectivityID = 0, bool bPaddedRadius = true);
@@ -169,11 +174,17 @@ public:
 
 	FPathSearchSpace DebugPathSearchSpace;
 
-	UPROPERTY()
-	TArray<TObjectPtr<ANavGen3DBoundsVolume>> BoundsVolumes;
+	TArray<TWeakObjectPtr<ANavGen3DBoundsVolume>> BoundsVolumes;
 
 public:
 	UWorld* FindWorld() const;
+
+#if WITH_EDITOR
+private:
+	void OnMapChanged(uint32 InMapChangeFlags);
+	void OnBeginPIE(bool bIsSimulating);
+	void OnEndPIE(bool bIsSimulating);
+#endif
 
 private:
 	struct FDebugProcessUndoState
@@ -199,5 +210,5 @@ private:
 	TMap<uint64, uint64> NavMeshVolumeMap_X;
 	TMap<uint64, uint64> NavMeshVolumeMap_Y;
 	TMap<uint64, uint64> NavMeshVolumeMap_Z;
-	TMap<int32, TMap<uint64, TArray<NavVolumeConnection>>> NavVolumeConnectionMap;
+	TMap<int32, TMap<uint64, TArray<FNavVolumeConnection>>> NavVolumeConnectionMap;
 };

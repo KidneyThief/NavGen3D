@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Volume.h"
+#include "NavGen3DBoundsVolumeAsset.h"
 #include "NavGen3DBoundsVolume.generated.h"
 
 UENUM(BlueprintType)
@@ -26,12 +27,24 @@ public:
 	virtual ~ANavGen3DBoundsVolume() override;
 
 	virtual void PostActorCreated() override;
+	virtual void PostLoad() override;
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& InPropertyChangedEvent) override;
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type InEndPlayReason) override;
 
 	UFUNCTION(CallInEditor, Category = "NavGen3D")
 	void GenerateNavMesh3D();
+
+	UFUNCTION(CallInEditor, Category = "NavGen3D")
+	void LoadNavMesh3DAsset();
+
+	void AddAssetToSolution();
+
+#if WITH_EDITOR
+	void CreateGeneratedAsset();
+	void SaveGeneratedAsset();
+	bool ValidateGeneratedAsset();
+#endif
 
 	UPROPERTY(BlueprintReadOnly, Category = "NavGen3D")
 	ENavGen3DBoundsVolumeStatus Status = ENavGen3DBoundsVolumeStatus::None;
@@ -44,4 +57,10 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "NavGen3D")
 	float MinVolumeSize = 0.0f;
+
+	UPROPERTY(BlueprintReadOnly, Category = "NavGen3D")
+	int32 GeneratedVolumeCount = 0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NavGen3D")
+	TObjectPtr<UNavGen3DBoundsVolumeAsset> NavMesh3DAsset = nullptr;
 };

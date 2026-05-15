@@ -1534,9 +1534,9 @@ FReply SNavGen3DWindow::OnFindCameraVolumeConnectionsClicked()
 			Subsystem->FindNavMeshVolumeConnections(Subsystem->DebugNavMeshAgentIndex, Sphere, *Volume);
 			if (UWorld* World = Subsystem->FindWorld())
 			{
-				if (const TArray<NavVolumeConnection>* Connections = Subsystem->GetVolumeConnections(Subsystem->DebugNavMeshAgentIndex, Volume->ID))
+				if (const TArray<FNavVolumeConnection>* Connections = Subsystem->GetVolumeConnections(Subsystem->DebugNavMeshAgentIndex, Volume->ID))
 				{
-					for (const NavVolumeConnection& Conn : *Connections)
+					for (const FNavVolumeConnection& Conn : *Connections)
 					{
 						DrawDebugSphere(World, Conn.Location, 15.0f, 8, FColor::Green, false, Subsystem->DebugDrawTime);
 					}
