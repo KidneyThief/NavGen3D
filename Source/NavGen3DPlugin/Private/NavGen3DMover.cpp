@@ -3,6 +3,10 @@
 #include "NavGen3DMover.h"
 #include "NavGen3DSubsystem.h"
 #include "DrawDebugHelpers.h"
+#include "NavGen3DSettings.h"
+
+// -- defined in NavGen3DSettings.h
+NavGen3D_DISABLE_OPTIMIZATION
 
 ANavGen3DMover::ANavGen3DMover()
 {
@@ -173,6 +177,8 @@ void ANavGen3DMover::SimReset(bool bResetPhysics)
 {
 	SimPathNodeIndex = 0;
 	bSettled         = false;
+	bFacingPath      = true;
+	bDecelerating    = false;
 	if (bResetPhysics)
 	{
 		SimVelocity = FVector::ZeroVector;
@@ -244,20 +250,30 @@ bool ANavGen3DMover::UpdateSimPathFollowing()
 	const FVector ToNode         = (NodeLocation - GetActorLocation()).GetSafeNormal();
 	const float   CurrentSpeed   = SimVelocity.Size();
 
-	// At the final destination, decelerate so we arrive with near-zero velocity.
-	// Stopping distance = v² / (2a); begin decelerating when we're within that distance.
+	// Commit to deceleration once within stopping distance, but only when velocity is
+	// negligible or already directed toward the destination — so the steering block gets
+	// a chance to correct sideways/backward momentum before we begin braking.
 	const bool bAtFinalNode = SimPathNodeIndex == Path.Num() - 1;
-	if (bAtFinalNode && CurrentSpeed > KINDA_SMALL_NUMBER && SimAcceleration > KINDA_SMALL_NUMBER)
+	if (!bDecelerating && bAtFinalNode && SimAcceleration > KINDA_SMALL_NUMBER)
 	{
-		const float StoppingDistance = (CurrentSpeed * CurrentSpeed) / (2.0f * SimAcceleration);
-		const float DistToNode       = FVector::Distance(GetActorLocation(), NodeLocation);
-		if (DistToNode <= StoppingDistance)
+		const bool bVelocityNegligible = SimVelocity.IsNearlyZero();
+		const bool bHeadingToward      = !bVelocityNegligible && FVector::DotProduct(SimVelocity.GetSafeNormal(), ToNode) > 0.0f;
+		if (bVelocityNegligible || bHeadingToward)
 		{
-			const float NewSpeed = FMath::Max(0.0f, CurrentSpeed - SimAcceleration * DeltaTime);
-			SimVelocity = NewSpeed > KINDA_SMALL_NUMBER ? SimVelocity.GetSafeNormal() * NewSpeed : FVector::ZeroVector;
-			SetActorLocation(GetActorLocation() + SimVelocity * DeltaTime, /*bSweep=*/true);
-			return true;
+			const float StoppingDistance = (CurrentSpeed * CurrentSpeed) / (2.0f * SimAcceleration);
+			if (FVector::Distance(GetActorLocation(), NodeLocation) <= StoppingDistance)
+			{
+				bDecelerating = true;
+			}
 		}
+	}
+
+	if (bDecelerating)
+	{
+		const float NewSpeed = FMath::Max(0.0f, CurrentSpeed - SimAcceleration * DeltaTime);
+		SimVelocity = NewSpeed > KINDA_SMALL_NUMBER ? SimVelocity.GetSafeNormal() * NewSpeed : FVector::ZeroVector;
+		SetActorLocation(GetActorLocation() + SimVelocity * DeltaTime, /*bSweep=*/true);
+		return true;
 	}
 
 	// Build a steering direction: toward the node, plus a counter for any velocity that is
@@ -285,43 +301,88 @@ void ANavGen3DMover::UpdateSimRotation()
 		return;
 	}
 
-	const float DeltaTime = World->GetDeltaSeconds();
-
-	FRotator TargetRotation;
-	if (SimVelocity.IsNearlyZero())
+	const UNavGen3DSubsystem* Subsystem = GEngine ? GEngine->GetEngineSubsystem<UNavGen3DSubsystem>() : nullptr;
+	if (!Subsystem)
 	{
-		// Stopped — face the target directly.
-		const UNavGen3DSubsystem* Subsystem = GEngine ? GEngine->GetEngineSubsystem<UNavGen3DSubsystem>() : nullptr;
-		if (!Subsystem)
-		{
-			return;
-		}
+		return;
+	}
 
-		const FVector TargetLocation = Subsystem->GetCameraLocation(AgentIndex);
-		if (TargetLocation.X >= FLT_MAX)
-		{
-			return;
-		}
+	const float   DeltaTime      = World->GetDeltaSeconds();
+	const FVector ActorLocation  = GetActorLocation();
+	const FVector CameraLocation = Subsystem->GetCameraLocation(AgentIndex);
+	const bool    bCameraValid   = CameraLocation.X < FLT_MAX;
 
-		const FVector ToTarget = (TargetLocation - GetActorLocation()).GetSafeNormal();
-		if (ToTarget.IsNearlyZero())
+	// Decide camera vs path look target.
+	// Settled and decel-phase always force camera. Otherwise use hysteresis on the
+	// SimPathingAngle: switch path→camera below 0.8×, switch camera→path above 1.2×.
+	bool bLookAtCamera = false;
+	if (bSettled || bDecelerating)
+	{
+		bLookAtCamera = true;
+		bFacingPath   = false;
+	}
+	else if (bCameraValid)
+	{
+		const FVector ToCamera   = CameraLocation - ActorLocation;
+		const float   CameraDist = ToCamera.Size();
+		if (CameraDist > KINDA_SMALL_NUMBER)
 		{
-			return;
-		}
+			const FVector ToCameraDir   = ToCamera / CameraDist;
+			const float   AngleToCamera = FMath::RadiansToDegrees(
+				FMath::Acos(FMath::Clamp(FVector::DotProduct(GetActorForwardVector(), ToCameraDir), -1.0f, 1.0f)));
+			const bool bHasLOS = !World->LineTraceTestByChannel(ActorLocation, CameraLocation, ECC_Visibility);
 
-		TargetRotation = ToTarget.Rotation();
+			if (bHasLOS)
+			{
+				bLookAtCamera = bFacingPath ? (AngleToCamera < SimPathingAngle * 0.8f)
+				                            : (AngleToCamera < SimPathingAngle * 1.2f);
+			}
+		}
+		bFacingPath = !bLookAtCamera;
 	}
 	else
 	{
-		// Moving — face toward the current path node, which is stable between node advances.
-		const TArray<FVector>& Path = SimPathSearchSpace.PathSolution;
-		const FVector NodeLocation  = Path.IsValidIndex(SimPathNodeIndex) ? Path[SimPathNodeIndex] : GoalLocation;
-		const FVector ToNode        = (NodeLocation - GetActorLocation()).GetSafeNormal();
-		if (ToNode.IsNearlyZero())
+		bFacingPath = true;
+	}
+
+	// Compute rotation target.
+	FRotator TargetRotation;
+	if (bLookAtCamera && bCameraValid)
+	{
+		const FVector ToCamera = (CameraLocation - ActorLocation).GetSafeNormal();
+		if (ToCamera.IsNearlyZero())
 		{
 			return;
 		}
-		TargetRotation = ToNode.Rotation();
+		TargetRotation = ToCamera.Rotation();
+	}
+	else
+	{
+		// Look ahead along the path at 2× agent radius; fall back to goal direction.
+		const float AgentRadius = Subsystem->GetAgentCollisionRadius(AgentIndex, /*bPadded=*/false);
+		FVector LookAheadLocation;
+		if (SimPathLookAheadLocation(ActorLocation, AgentRadius * 2.0f, LookAheadLocation))
+		{
+			const FVector ToLookAhead = (LookAheadLocation - ActorLocation).GetSafeNormal();
+			if (ToLookAhead.IsNearlyZero())
+			{
+				return;
+			}
+			TargetRotation = ToLookAhead.Rotation();
+		}
+		else if (GoalLocation.X < FLT_MAX)
+		{
+			const FVector ToGoal = (GoalLocation - ActorLocation).GetSafeNormal();
+			if (ToGoal.IsNearlyZero())
+			{
+				return;
+			}
+			TargetRotation = ToGoal.Rotation();
+		}
+		else
+		{
+			return;
+		}
 	}
 
 	const FRotator NewRotation = FMath::RInterpConstantTo(GetActorRotation(), TargetRotation, DeltaTime, SimTurnRate);
@@ -349,33 +410,103 @@ void ANavGen3DMover::UpdateSimLocation()
 		return;
 	}
 
-	const FVector ToGoal    = (GoalLocation - GetActorLocation()).GetSafeNormal();
-	const float   CosAngle  = FMath::Cos(FMath::DegreesToRadians(SimPathingAngle));
-	const bool    bFacing   = FVector::DotProduct(GetActorForwardVector(), ToGoal) >= CosAngle;
-
-	if (!bFacing)
+	// Gate on velocity direction only — visual facing is independent of movement.
+	// When velocity is zero or already pointed toward the goal, path following runs
+	// freely and its steering builds velocity toward the next node. Only decelerate
+	// when existing velocity is misaligned enough that we'd be accelerating backward.
+	if (!SimVelocity.IsNearlyZero())
 	{
-		// Not yet aligned — decelerate if SimVelocity is also outside the angle to the goal.
-		if (!SimVelocity.IsNearlyZero())
+		const FVector ToGoal   = (GoalLocation - GetActorLocation()).GetSafeNormal();
+		const float   CosAngle = FMath::Cos(FMath::DegreesToRadians(SimPathingAngle));
+		if (FVector::DotProduct(SimVelocity.GetSafeNormal(), ToGoal) < CosAngle)
 		{
-			const float DotVel = FVector::DotProduct(SimVelocity.GetSafeNormal(), ToGoal);
-			if (DotVel < CosAngle)
+			UWorld* World = GetWorld();
+			if (World)
 			{
-				UWorld* World = GetWorld();
-				if (World)
-				{
-					const float DeltaTime    = World->GetDeltaSeconds();
-					const float CurrentSpeed = SimVelocity.Size();
-					const float NewSpeed     = FMath::Max(0.0f, CurrentSpeed - SimAcceleration * DeltaTime);
-					SimVelocity = NewSpeed > KINDA_SMALL_NUMBER ? SimVelocity.GetSafeNormal() * NewSpeed : FVector::ZeroVector;
-					SetActorLocation(GetActorLocation() + SimVelocity * DeltaTime, /*bSweep=*/true);
-				}
+				const float DeltaTime    = World->GetDeltaSeconds();
+				const float CurrentSpeed = SimVelocity.Size();
+				const float NewSpeed     = FMath::Max(0.0f, CurrentSpeed - SimAcceleration * DeltaTime);
+				SimVelocity = NewSpeed > KINDA_SMALL_NUMBER ? SimVelocity.GetSafeNormal() * NewSpeed : FVector::ZeroVector;
+				SetActorLocation(GetActorLocation() + SimVelocity * DeltaTime, /*bSweep=*/true);
 			}
+			return;
 		}
-		return;
 	}
 
 	UpdateSimPathFollowing();
+}
+
+bool ANavGen3DMover::SimPathLookAheadLocation(const FVector& InCurrentLocation, float InDistance, FVector& OutPathLocation) const
+{
+	const TArray<FVector>& Path = SimPathSearchSpace.PathSolution;
+	if (Path.IsEmpty())
+	{
+		return false;
+	}
+
+	float RemainingDistance = InDistance;
+	int32 NextSegmentIndex; // first segment index to walk after finding the start point
+
+	if (SimPathNodeIndex == 0 || Path.Num() == 1)
+	{
+		// No previous node — back out dist-to-origin from InDistance, then walk from Path[0].
+		RemainingDistance = FMath::Max(0.0f, InDistance - FVector::Distance(InCurrentLocation, Path[0]));
+		NextSegmentIndex  = 0;
+	}
+	else
+	{
+		// Project current location onto segment [SimPathNodeIndex-1, SimPathNodeIndex].
+		const FVector SegA     = Path[SimPathNodeIndex - 1];
+		const FVector SegB     = Path[SimPathNodeIndex];
+		const FVector SegDelta = SegB - SegA;
+		const float   SegLenSq = SegDelta.SizeSquared();
+
+		FVector Projected;
+		if (SegLenSq < KINDA_SMALL_NUMBER)
+		{
+			Projected = SegA;
+		}
+		else
+		{
+			const float t = FMath::Clamp(FVector::DotProduct(InCurrentLocation - SegA, SegDelta) / SegLenSq, 0.0f, 1.0f);
+			Projected = SegA + SegDelta * t;
+		}
+
+		const float DistToSegEnd = FVector::Distance(Projected, SegB);
+		if (RemainingDistance <= DistToSegEnd)
+		{
+			OutPathLocation = Projected + (SegB - Projected).GetSafeNormal() * RemainingDistance;
+			return true;
+		}
+
+		RemainingDistance -= DistToSegEnd;
+		NextSegmentIndex   = SimPathNodeIndex; // continue from SegB = Path[SimPathNodeIndex]
+	}
+
+	// Walk forward through remaining segments.
+	for (int32 i = NextSegmentIndex; i < Path.Num() - 1; ++i)
+	{
+		const FVector SegA   = Path[i];
+		const FVector SegB   = Path[i + 1];
+		const float   SegLen = FVector::Distance(SegA, SegB);
+
+		if (SegLen < KINDA_SMALL_NUMBER)
+		{
+			continue;
+		}
+
+		if (RemainingDistance <= SegLen)
+		{
+			OutPathLocation = SegA + (SegB - SegA).GetSafeNormal() * RemainingDistance;
+			return true;
+		}
+
+		RemainingDistance -= SegLen;
+	}
+
+	// Distance exceeded the full path — clamp to destination.
+	OutPathLocation = Path.Last();
+	return true;
 }
 
 void ANavGen3DMover::DebugDrawSimulation()
@@ -432,3 +563,5 @@ void ANavGen3DMover::DebugDrawMover()
 
 	DebugDrawSimulation();
 }
+
+NavGen3D_ENABLE_OPTIMIZATION

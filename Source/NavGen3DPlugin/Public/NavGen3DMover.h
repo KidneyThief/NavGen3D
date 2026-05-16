@@ -56,8 +56,11 @@ private:
 	bool UpdateSimPathFollowing();
 	void UpdateSimPathNode();
 	void SimReset(bool bResetPhysics = false);
+	bool SimPathLookAheadLocation(const FVector& InCurrentLocation, float InDistance, FVector& OutPathLocation) const;
 
 	FPathSearchSpace SimPathSearchSpace;
 	int32 SimPathNodeIndex = 0;
 	bool  bSettled         = false;
+	bool  bFacingPath      = true;
+	bool  bDecelerating    = false;
 };

@@ -13,6 +13,10 @@
 //////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////// 
 #include "Tools/NavGen3DPluginInteractiveTool.h"
+#include "NavGen3DSettings.h"
+
+// -- defined in NavGen3DSettings.h
+NavGen3D_DISABLE_OPTIMIZATION
 
 // step 2: register a ToolBuilder in FNavGen3DPluginEditorMode::Enter() below
 
@@ -71,3 +75,5 @@ TMap<FName, TArray<TSharedPtr<FUICommandInfo>>> UNavGen3DPluginEditorMode::GetMo
 }
 
 #undef LOCTEXT_NAMESPACE
+
+NavGen3D_ENABLE_OPTIMIZATION

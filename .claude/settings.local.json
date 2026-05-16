@@ -18,7 +18,10 @@
       "PowerShell(cmd /c \"dir /b `\"C:\\\\Program Files\\\\Epic Games\\\\UE_5.3\\\\Engine\\\\Build\\\\BatchFiles`\"\")",
       "PowerShell(cmd /c \"dir /b `\"C:\\\\Program Files\\\\Epic Games\\\\UE_5.3\\\\Engine\\\\Binaries\\\\Win64`\" | findstr /i `\"UnrealBuildTool GenerateProject UnrealVersionSelector`\"\")",
       "PowerShell(cmd /c \"dir /s /b `\"C:\\\\Program Files\\\\Epic Games\\\\UE_5.3`\" 2>nul | findstr /i `\"UnrealBuildTool.exe GenerateProjectFiles.bat UnrealVersionSelector.exe`\"\")",
-      "PowerShell(& \"C:\\\\Program Files\\\\Epic Games\\\\UE_5.3\\\\Engine\\\\Binaries\\\\DotNET\\\\UnrealBuildTool\\\\UnrealBuildTool.exe\" -projectfiles -project=\"C:\\\\cygwin64\\\\home\\\\kidne\\\\_DEV\\\\NavGen3D\\\\NavGen3D\\\\NavGen3D.uproject\" -game -rocket -progress 2>&1)"
+      "PowerShell(& \"C:\\\\Program Files\\\\Epic Games\\\\UE_5.3\\\\Engine\\\\Binaries\\\\DotNET\\\\UnrealBuildTool\\\\UnrealBuildTool.exe\" -projectfiles -project=\"C:\\\\cygwin64\\\\home\\\\kidne\\\\_DEV\\\\NavGen3D\\\\NavGen3D\\\\NavGen3D.uproject\" -game -rocket -progress 2>&1)",
+      "Bash(Get-Content \"C:\\\\cygwin64\\\\home\\\\kidne\\\\_DEV\\\\NavGen3D\\\\NavGen3D\\\\Plugins\\\\NavGen3DPlugin\\\\Source\\\\NavGen3DPlugin\\\\Private\\\\NavGen3DSubsystem.cpp\")",
+      "Bash(Measure-Object -Line)",
+      "PowerShell(\\(Get-Content \"C:\\\\cygwin64\\\\home\\\\kidne\\\\_DEV\\\\NavGen3D\\\\NavGen3D\\\\Plugins\\\\NavGen3DPlugin\\\\Source\\\\NavGen3DPlugin\\\\Private\\\\NavGen3DSubsystem.cpp\" | Measure-Object -Line\\).Lines; \\(Get-Content \"C:\\\\cygwin64\\\\home\\\\kidne\\\\_DEV\\\\NavGen3D\\\\NavGen3D\\\\Plugins\\\\NavGen3DPlugin\\\\Source\\\\NavGen3DPlugin\\\\Private\\\\SNavGen3DWindow.cpp\" | Measure-Object -Line\\).Lines)"
     ]
   }
 }

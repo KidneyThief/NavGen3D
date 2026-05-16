@@ -20,6 +20,10 @@
 #include "Widgets/Views/SListView.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Framework/Docking/TabManager.h"
+#include "NavGen3DSettings.h"
+
+// -- defined in NavGen3DSettings.h
+NavGen3D_DISABLE_OPTIMIZATION
 
 void SNavGen3DWindow::Construct(const FArguments& InArgs)
 {
@@ -1556,3 +1560,5 @@ FReply SNavGen3DWindow::OnValidateNavMesh3DClicked()
 	}
 	return FReply::Handled();
 }
+
+NavGen3D_ENABLE_OPTIMIZATION

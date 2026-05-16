@@ -12,6 +12,9 @@
 #include "UObject/SavePackage.h"
 #endif
 
+// -- defined in NavGen3DSettings.h
+NavGen3D_DISABLE_OPTIMIZATION
+
 ANavGen3DBoundsVolume::ANavGen3DBoundsVolume(const FObjectInitializer& InObjectInitializer)
 	: Super(InObjectInitializer)
 {
@@ -297,3 +300,5 @@ void ANavGen3DBoundsVolume::EndPlay(const EEndPlayReason::Type InEndPlayReason)
 	Status = ENavGen3DBoundsVolumeStatus::None;
 	Super::EndPlay(InEndPlayReason);
 }
+
+NavGen3D_ENABLE_OPTIMIZATION

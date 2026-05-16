@@ -28,3 +28,6 @@ public:
 	UPROPERTY(config, EditAnywhere, Category="Generation")
 	int32 MaxVolumeCount = 10000;
 };
+
+#define NavGen3D_DISABLE_OPTIMIZATION UE_DISABLE_OPTIMIZATION
+#define NavGen3D_ENABLE_OPTIMIZATION  UE_ENABLE_OPTIMIZATION

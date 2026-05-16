@@ -3,6 +3,10 @@
 #include "NavGen3DPluginEditorModeCommands.h"
 #include "NavGen3DPluginEditorMode.h"
 #include "EditorStyleSet.h"
+#include "NavGen3DSettings.h"
+
+// -- defined in NavGen3DSettings.h
+NavGen3D_DISABLE_OPTIMIZATION
 
 #define LOCTEXT_NAMESPACE "NavGen3DPluginEditorModeCommands"
 
@@ -28,3 +32,5 @@ TMap<FName, TArray<TSharedPtr<FUICommandInfo>>> FNavGen3DPluginEditorModeCommand
 }
 
 #undef LOCTEXT_NAMESPACE
+
+NavGen3D_ENABLE_OPTIMIZATION

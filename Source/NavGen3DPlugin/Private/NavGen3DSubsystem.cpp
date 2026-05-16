@@ -13,7 +13,8 @@
 #include "Editor.h"
 #include "NavigationSystem.h"
 
-UE_DISABLE_OPTIMIZATION
+// -- defined in NavGen3DSettings.h
+NavGen3D_DISABLE_OPTIMIZATION
 
 void UNavGen3DSubsystem::Initialize(FSubsystemCollectionBase& InCollection)
 {
@@ -2361,4 +2362,4 @@ void UNavGen3DSubsystem::OnEndFrame()
 	}
 }
 
-UE_ENABLE_OPTIMIZATION
+NavGen3D_ENABLE_OPTIMIZATION

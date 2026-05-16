@@ -9,6 +9,10 @@
 #include "Widgets/SWindow.h"
 #include "WorkspaceMenuStructure.h"
 #include "WorkspaceMenuStructureModule.h"
+#include "NavGen3DSettings.h"
+
+// -- defined in NavGen3DSettings.h
+NavGen3D_DISABLE_OPTIMIZATION
 
 #define LOCTEXT_NAMESPACE "NavGen3DPluginModule"
 
@@ -67,3 +71,5 @@ TSharedRef<SDockTab> FNavGen3DPluginModule::SpawnNavGen3DTab(const FSpawnTabArgs
 #undef LOCTEXT_NAMESPACE
 
 IMPLEMENT_MODULE(FNavGen3DPluginModule, NavGen3DPluginEditorMode)
+
+NavGen3D_ENABLE_OPTIMIZATION

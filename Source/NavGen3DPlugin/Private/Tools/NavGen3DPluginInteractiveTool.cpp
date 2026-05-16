@@ -10,6 +10,10 @@
 #include "Engine/World.h"
 
 #include "SceneManagement.h"
+#include "NavGen3DSettings.h"
+
+// -- defined in NavGen3DSettings.h
+NavGen3D_DISABLE_OPTIMIZATION
 
 // localization namespace
 #define LOCTEXT_NAMESPACE "UNavGen3DPluginInteractiveTool"
@@ -152,3 +156,5 @@ void UNavGen3DPluginInteractiveTool::Render(IToolsContextRenderAPI* RenderAPI)
 
 
 #undef LOCTEXT_NAMESPACE
+
+NavGen3D_ENABLE_OPTIMIZATION

@@ -5,6 +5,10 @@
 #include "ToolBuilderUtil.h"
 #include "CollisionQueryParams.h"
 #include "Engine/World.h"
+#include "NavGen3DSettings.h"
+
+// -- defined in NavGen3DSettings.h
+NavGen3D_DISABLE_OPTIMIZATION
 
 // localization namespace
 #define LOCTEXT_NAMESPACE "NavGen3DPluginSimpleTool"
@@ -93,3 +97,5 @@ void UNavGen3DPluginSimpleTool::OnClicked(const FInputDeviceRay& ClickPos)
 
 
 #undef LOCTEXT_NAMESPACE
+
+NavGen3D_ENABLE_OPTIMIZATION

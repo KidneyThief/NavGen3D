@@ -8,6 +8,10 @@
 #include "PropertyEditorModule.h"
 #include "IDetailsView.h"
 #include "EditorModeManager.h"
+#include "NavGen3DSettings.h"
+
+// -- defined in NavGen3DSettings.h
+NavGen3D_DISABLE_OPTIMIZATION
 
 #define LOCTEXT_NAMESPACE "NavGen3DPluginEditorModeToolkit"
 
@@ -37,3 +41,5 @@ FText FNavGen3DPluginEditorModeToolkit::GetBaseToolkitName() const
 }
 
 #undef LOCTEXT_NAMESPACE
+
+NavGen3D_ENABLE_OPTIMIZATION
