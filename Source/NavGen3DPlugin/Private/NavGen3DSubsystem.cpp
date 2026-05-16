@@ -88,8 +88,10 @@ UWorld* UNavGen3DSubsystem::FindWorld() const
 	return EditorWorld;
 }
 
-FVector UNavGen3DSubsystem::GetCameraLocation()
+FVector UNavGen3DSubsystem::GetCameraLocation(int32 InAgentIndex) const
 {
+	FVector Result = InvalidLocation;
+
 	if (!IsPlayMode())
 	{
 		if (GEditor)
@@ -98,24 +100,43 @@ FVector UNavGen3DSubsystem::GetCameraLocation()
 			{
 				if (LevelVC && LevelVC->IsPerspective())
 				{
-					return LevelVC->GetViewLocation();
+					Result = LevelVC->GetViewLocation();
+					break;
 				}
 			}
 		}
-		return InvalidLocation;
 	}
-
-	if (UWorld* World = FindWorld())
+	else if (UWorld* World = FindWorld())
 	{
 		if (APlayerController* PC = World->GetFirstPlayerController())
 		{
 			if (APawn* Pawn = PC->GetPawn())
 			{
-				return Pawn->GetActorLocation();
+				Result = Pawn->GetActorLocation();
 			}
 		}
 	}
-	return FVector::ZeroVector;
+
+	if (Result.X < FLT_MAX && InAgentIndex >= 0)
+	{
+		const float LiftRadius = GetAgentCollisionRadius(InAgentIndex, /*bPadded=*/true);
+		if (UWorld* World = FindWorld())
+		{
+			FHitResult Hit;
+			const FVector TraceStart = Result + FVector(0.0f, 0.0f, LiftRadius);
+			const FVector TraceEnd   = Result - FVector(0.0f, 0.0f, LiftRadius * 20.0f);
+			if (World->LineTraceSingleByChannel(Hit, TraceStart, TraceEnd, ECC_WorldStatic))
+			{
+				const float MinZ = Hit.ImpactPoint.Z + LiftRadius;
+				if (Result.Z < MinZ)
+				{
+					Result.Z = MinZ;
+				}
+			}
+		}
+	}
+
+	return Result;
 }
 
 bool UNavGen3DSubsystem::GenerateNavMesh3DConnections(int32 InAgentIndex)
@@ -294,7 +315,7 @@ float UNavGen3DSubsystem::GetAgentCollisionRadius(int32 InAgentIndex, bool bPadd
 	return bPadded ? 1.1f * BaseRadius : BaseRadius;
 }
 
-bool UNavGen3DSubsystem::IsPlayMode()
+bool UNavGen3DSubsystem::IsPlayMode() const
 {
 	for (const FWorldContext& WorldContext : GEngine->GetWorldContexts())
 	{
@@ -1393,7 +1414,7 @@ bool UNavGen3DSubsystem::DebugValidatePath(const FPathSearchSpace& InSearchSpace
 	return bValid;
 }
 
-void FPathSearchSpace::DrawPath(float InDrawTime) const
+void FPathSearchSpace::DebugDrawPath(float InDrawTime) const
 {
 	if (PathSolution.IsEmpty())
 	{
@@ -2297,7 +2318,7 @@ void UNavGen3DSubsystem::OnEndFrame()
 
 		if (DebugPathSearchSpace.Status == EPathSearchStatus::Success)
 		{
-			DebugPathSearchSpace.DrawPath(DrawTime);
+			DebugPathSearchSpace.DebugDrawPath(DrawTime);
 		}
 	}
 

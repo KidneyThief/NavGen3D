@@ -56,7 +56,7 @@ struct FPathSearchSpace
 
 	void Reset();
 	void Initialize(UNavGen3DSubsystem* InSubsystem, int32 InAgentIndex, const FVector& PathOrigin, const FVector& PathDestination);
-	void DrawPath(float InDrawTime) const;
+	void DebugDrawPath(float InDrawTime) const;
 };
 
 UCLASS()
@@ -90,8 +90,8 @@ public:
 	void SetNavGen3DWindow(TSharedPtr<SNavGen3DWindow> InWindow);
 	void AddLogMessage(ENavGen3DLogCategory InCategory, const FString& InActorName, const FString& InMessage);
 
-	bool IsPlayMode();
-	FVector GetCameraLocation();
+	bool IsPlayMode() const;
+	FVector GetCameraLocation(int32 InAgentIndex = -1) const;
 	bool GetAgentSettings(int32 InIndex, float& OutRadius, float& OutHeight) const;
 	float GetAgentCollisionRadius(int32 InAgentIndex, bool bPadded) const;
 	int32 GetSupportedAgentCount() const;
