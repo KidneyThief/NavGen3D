@@ -118,25 +118,6 @@ FVector UNavGen3DSubsystem::GetCameraLocation(int32 InAgentIndex) const
 		}
 	}
 
-	if (Result.X < FLT_MAX && InAgentIndex >= 0)
-	{
-		const float LiftRadius = GetAgentCollisionRadius(InAgentIndex, /*bPadded=*/true);
-		if (UWorld* World = FindWorld())
-		{
-			FHitResult Hit;
-			const FVector TraceStart = Result + FVector(0.0f, 0.0f, LiftRadius);
-			const FVector TraceEnd   = Result - FVector(0.0f, 0.0f, LiftRadius * 20.0f);
-			if (World->LineTraceSingleByChannel(Hit, TraceStart, TraceEnd, ECC_WorldStatic))
-			{
-				const float MinZ = Hit.ImpactPoint.Z + LiftRadius;
-				if (Result.Z < MinZ)
-				{
-					Result.Z = MinZ;
-				}
-			}
-		}
-	}
-
 	return Result;
 }
 
@@ -1075,47 +1056,80 @@ NavMeshVolume* UNavGen3DSubsystem::FindClosestVolumeContainingLocation(int32 InA
 	const TMap<uint64, TArray<FNavVolumeConnection>>* AgentMap = NavVolumeConnectionMap.Find(InAgentIndex);
 	UWorld* World = FindWorld();
 
-	const float MaxDist = (float)GetDefault<UNavGen3DSettings>()->MaxVolumeSize;
+	const int32 GridSize = GetDefault<UNavGen3DSettings>()->MaxVolumeSize;
 	NavMeshVolume* ClosestVolume = nullptr;
-	float ClosestDistSq = MaxDist * MaxDist;
+	float ClosestDistSq = (float)GridSize * (float)GridSize;
 
-	for (auto& Pair : NavMeshSolutionMap)
+	const int32 IX = FMath::FloorToInt(InLocation.X / GridSize);
+	const int32 IY = FMath::FloorToInt(InLocation.Y / GridSize);
+	const int32 IZ = FMath::FloorToInt(InLocation.Z / GridSize);
+
+	for (int32 DX = -1; DX <= 1; ++DX)
 	{
-		NavMeshVolume& Volume = Pair.Value;
-
-		if (AgentMap && !AgentMap->Contains(Volume.ID))
+		for (int32 DY = -1; DY <= 1; ++DY)
 		{
-			continue;
-		}
-
-		if (InConnectivityID > 0)
-		{
-			const int32* ConnID = Volume.ConnectivityIDByAgent.Find(InAgentIndex);
-			if (!ConnID || *ConnID != InConnectivityID)
+			for (int32 DZ = -1; DZ <= 1; ++DZ)
 			{
-				continue;
-			}
-		}
+				const uint64 Hash = ((uint64)((IX + DX) & 0xFFFF) << 32)
+				                  | ((uint64)((IY + DY) & 0xFFFF) << 16)
+				                  |  (uint64)((IZ + DZ) & 0xFFFF);
 
-		const FVector VolumeCenter = Volume.Bounds.GetCenter();
-		const float DistSq = FVector::DistSquared(VolumeCenter, InLocation);
-		if (DistSq >= ClosestDistSq)
-		{
-			continue;
-		}
+				const TArray<uint64>* VolumeIDs = NavMeshSolutionMapByLocation.Find(Hash);
+				if (!VolumeIDs) { continue; }
 
-		if (Volume.Bounds.IsInsideOrOn(InLocation))
-		{
-			ClosestDistSq = DistSq;
-			ClosestVolume = &Volume;
-		}
-		else if (World)
-		{
-			FHitResult HitResult;
-			if (!World->SweepSingleByChannel(HitResult, InLocation, VolumeCenter, FQuat::Identity, ECC_WorldStatic, Sphere))
-			{
-				ClosestDistSq = DistSq;
-				ClosestVolume = &Volume;
+				for (uint64 VolumeID : *VolumeIDs)
+				{
+					NavMeshVolume* Volume = NavMeshSolutionMap.Find(VolumeID);
+					if (!Volume) { continue; }
+
+					if (AgentMap && !AgentMap->Contains(Volume->ID))
+					{
+						continue;
+					}
+
+					if (InConnectivityID > 0)
+					{
+						const int32* ConnID = Volume->ConnectivityIDByAgent.Find(InAgentIndex);
+						if (!ConnID || *ConnID != InConnectivityID)
+						{
+							continue;
+						}
+					}
+
+					const FVector VolumeCenter = Volume->Bounds.GetCenter();
+					const float DistSq = FVector::DistSquared(VolumeCenter, InLocation);
+					if (DistSq >= ClosestDistSq)
+					{
+						continue;
+					}
+
+					if (Volume->Bounds.IsInsideOrOn(InLocation))
+					{
+						ClosestDistSq = DistSq;
+						ClosestVolume = Volume;
+					}
+					else if (World)
+					{
+						FHitResult HitResult;
+						if (!World->SweepSingleByChannel(HitResult, InLocation, VolumeCenter, FQuat::Identity, ECC_WorldStatic, Sphere))
+						{
+							ClosestDistSq = DistSq;
+							ClosestVolume = Volume;
+						}
+						else
+						{
+							// Ignore hits whose impact point is away from the volume center —
+							// geometry behind InLocation should not block access to the volume.
+							const FVector ToCenter = VolumeCenter - InLocation;
+							const FVector ToImpact = HitResult.ImpactPoint - InLocation;
+							if (FVector::DotProduct(ToCenter, ToImpact) <= 0.0f)
+							{
+								ClosestDistSq = DistSq;
+								ClosestVolume = Volume;
+							}
+						}
+					}
+				}
 			}
 		}
 	}

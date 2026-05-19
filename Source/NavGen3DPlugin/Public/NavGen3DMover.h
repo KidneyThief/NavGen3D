@@ -38,20 +38,19 @@ public:
 	float SimPathingAngle = 60.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NavGen3D")
-	float MinApproachDistance = 800.0f;
+	float ApproachDistance = 1000.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NavGen3D")
-	float MaxRepositionDistance = 1200.0f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NavGen3D")
-	FVector GoalLocation = FVector(FLT_MAX);
+	FVector ApproachLocation = FVector(FLT_MAX);
 
 private:
 	void DebugDrawMover();
-	void DebugDrawSimulation();
-	void UpdateGoalLocation();
+	void SimDrawPath();
+	void SimDrawSteering();
+	void UpdateApproachLocation();
 	void UpdateSimLocation();
 	void UpdateSimRotation();
+	void UpdateSimSteering();
 	bool IsAtGoalLocation() const;
 	bool UpdateSimPathFollowing();
 	void UpdateSimPathNode();
@@ -59,8 +58,16 @@ private:
 	bool SimPathLookAheadLocation(const FVector& InCurrentLocation, float InDistance, FVector& OutPathLocation) const;
 
 	FPathSearchSpace SimPathSearchSpace;
-	int32 SimPathNodeIndex = 0;
-	bool  bSettled         = false;
-	bool  bFacingPath      = true;
-	bool  bDecelerating    = false;
+	int32   SimPathNodeIndex  = 0;
+	bool    bSettled          = false;
+	bool    bFacingPath       = true;
+	bool    bDecelerating     = false;
+	FVector SimSteeringUp        = FVector::ZeroVector;
+	FVector SimSteeringDown      = FVector::ZeroVector;
+	FVector SimSteeringLeft      = FVector::ZeroVector;
+	FVector SimSteeringRight     = FVector::ZeroVector;
+	FVector SimSteeringResult    = FVector::ZeroVector;
+
+	inline static float SimSteeringTime  = 2.0f;
+	inline static float SimSteeringAngle = 30.0f;
 };
