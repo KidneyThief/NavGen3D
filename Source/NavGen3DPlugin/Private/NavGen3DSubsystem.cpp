@@ -327,16 +327,13 @@ void UNavGen3DSubsystem::SetNavGen3DWindow(TSharedPtr<SNavGen3DWindow> InWindow)
 
 void UNavGen3DSubsystem::AddLogMessage(ENavGen3DLogCategory InCategory, const FString& InActorName, const FString& InMessage)
 {
-	static const TMap<ENavGen3DLogCategory, FString> CategoryLabels = {
-		{ ENavGen3DLogCategory::Info,    TEXT("Info")    },
-		{ ENavGen3DLogCategory::Warning, TEXT("Warning") },
-		{ ENavGen3DLogCategory::Error,   TEXT("Error")   }
-	};
 	const FString ResolvedName = InActorName.IsEmpty() ? TEXT("<unknown>") : InActorName;
-	const FString FormattedMessage = FString::Printf(TEXT("[%s] %s: %s"), *CategoryLabels[InCategory], *ResolvedName, *InMessage);
-	if (TSharedPtr<SNavGen3DWindow> Window = NavGen3DWindowPtr.Pin())
+	const FString FormattedMessage = FString::Printf(TEXT("%s: %s"), *ResolvedName, *InMessage);
+	switch (InCategory)
 	{
-		Window->AddLogEntry(InCategory, ResolvedName, FormattedMessage);
+		case ENavGen3DLogCategory::Warning: UE_LOG(LogNavGen3D, Warning, TEXT("%s"), *FormattedMessage); break;
+		case ENavGen3DLogCategory::Error:   UE_LOG(LogNavGen3D, Error,   TEXT("%s"), *FormattedMessage); break;
+		default:                            UE_LOG(LogNavGen3D, Display, TEXT("%s"), *FormattedMessage); break;
 	}
 }
 

@@ -3,6 +3,8 @@
 #include "SNavGen3DWindow.h"
 #include "NavGen3DSubsystem.h"
 #include "NavGen3DBoundsVolume.h"
+#include "NavGen3DMover.h"
+#include "EngineUtils.h"
 #include "GameFramework/PlayerController.h"
 #include "Editor.h"
 #include "Selection.h"
@@ -11,19 +13,37 @@
 #include "Widgets/Input/SEditableTextBox.h"
 #include "Widgets/Input/SSlider.h"
 #include "Widgets/Input/SButton.h"
-#include "Widgets/Input/SSearchBox.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SSeparator.h"
-#include "Widgets/Layout/SSplitter.h"
+#include "Widgets/Layout/SScrollBox.h"
+#include "Widgets/Layout/SExpandableArea.h"
 #include "Widgets/Layout/SUniformGridPanel.h"
-#include "Widgets/Views/SListView.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Framework/Docking/TabManager.h"
 #include "NavGen3DSettings.h"
 
 // -- defined in NavGen3DSettings.h
 NavGen3D_DISABLE_OPTIMIZATION
+
+static ANavGen3DMover* GetFirstMover(UNavGen3DSubsystem* Subsystem)
+{
+	if (UWorld* World = Subsystem ? Subsystem->FindWorld() : nullptr)
+	{
+		for (TActorIterator<ANavGen3DMover> It(World); It; ++It)
+			return *It;
+	}
+	return nullptr;
+}
+
+static void ForEachMover(UNavGen3DSubsystem* Subsystem, TFunctionRef<void(ANavGen3DMover*)> Func)
+{
+	if (UWorld* World = Subsystem ? Subsystem->FindWorld() : nullptr)
+	{
+		for (TActorIterator<ANavGen3DMover> It(World); It; ++It)
+			Func(*It);
+	}
+}
 
 void SNavGen3DWindow::Construct(const FArguments& InArgs)
 {
@@ -33,54 +53,41 @@ void SNavGen3DWindow::Construct(const FArguments& InArgs)
 	ChildSlot
 	[
 		SNew(SBox)
-		.MinDesiredWidth(620.0f)
+		.MinDesiredWidth(300.0f)
 		.MinDesiredHeight(520.0f)
 		[
-			SNew(SVerticalBox)
+			SNew(SScrollBox)
 
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.HAlign(HAlign_Right)
-			.Padding(4.0f, 4.0f, 4.0f, 0.0f)
+			+ SScrollBox::Slot()
 			[
-				SNew(SButton)
-				.Text(this, &SNavGen3DWindow::GetToggleLogButtonText)
-				.OnClicked(this, &SNavGen3DWindow::OnToggleLogPanelClicked)
-			]
+				SNew(SVerticalBox)
 
-			+ SVerticalBox::Slot()
-			.FillHeight(1.0f)
-			[
-				SNew(SSplitter)
-				.Orientation(Orient_Horizontal)
-
-				+ SSplitter::Slot()
-				.Value(0.5f)
+				// Generation status banner — lives outside any collapsible section
+				+ SVerticalBox::Slot()
+				.AutoHeight()
+				.Padding(8.0f, 8.0f, 8.0f, 2.0f)
 				[
-					SNew(SVerticalBox)
+					SNew(STextBlock)
+					.Text(this, &SNavGen3DWindow::GetGenerationStatusText)
+					.ColorAndOpacity(FSlateColor(FLinearColor(1.0f, 0.8f, 0.2f)))
+					.Visibility(this, &SNavGen3DWindow::GetGenerationStatusVisibility)
+				]
 
-					+ SVerticalBox::Slot()
-					.FillHeight(1.0f)
+				// ---- Debug Settings ----
+				+ SVerticalBox::Slot()
+				.AutoHeight()
+				[
+					SNew(SExpandableArea)
+					.InitiallyCollapsed(false)
+					.HeaderContent()
+					[
+						SNew(STextBlock)
+						.Text(FText::FromString("Debug Settings"))
+						.ColorAndOpacity(LabelColor)
+					]
+					.BodyContent()
 					[
 						SNew(SVerticalBox)
-						.Clipping(EWidgetClipping::ClipToBounds)
-
-						+ SVerticalBox::Slot()
-						.AutoHeight()
-						.Padding(8.0f, 8.0f, 8.0f, 2.0f)
-						[
-							SNew(STextBlock)
-							.Text(FText::FromString("Debug Settings"))
-							.ColorAndOpacity(LabelColor)
-						]
-
-						+ SVerticalBox::Slot()
-						.AutoHeight()
-						.Padding(8.0f, 0.0f, 8.0f, 4.0f)
-						[
-							SNew(SSeparator)
-							.Orientation(Orient_Horizontal)
-						]
 
 						+ SVerticalBox::Slot()
 						.AutoHeight()
@@ -96,24 +103,10 @@ void SNavGen3DWindow::Construct(const FArguments& InArgs)
 						.Padding(8.0f, 4.0f, 8.0f, 4.0f)
 						[
 							SNew(SHorizontalBox)
-
-							+ SHorizontalBox::Slot()
-							.AutoWidth()
-							.VAlign(VAlign_Center)
-							[
-								SNew(STextBlock)
-								.Text(FText::FromString("Camera Loc:  "))
-								.ColorAndOpacity(TextColor)
-							]
-
-							+ SHorizontalBox::Slot()
-							.AutoWidth()
-							.VAlign(VAlign_Center)
-							[
-								SNew(STextBlock)
-								.Text(this, &SNavGen3DWindow::GetCameraLocationText)
-								.ColorAndOpacity(TextColor)
-							]
+							+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+							[ SNew(STextBlock).Text(FText::FromString("Camera Loc:  ")).ColorAndOpacity(TextColor) ]
+							+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+							[ SNew(STextBlock).Text(this, &SNavGen3DWindow::GetCameraLocationText).ColorAndOpacity(TextColor) ]
 						]
 
 						+ SVerticalBox::Slot()
@@ -121,19 +114,9 @@ void SNavGen3DWindow::Construct(const FArguments& InArgs)
 						.Padding(8.0f, 4.0f, 8.0f, 4.0f)
 						[
 							SNew(SHorizontalBox)
-
-							+ SHorizontalBox::Slot()
-							.AutoWidth()
-							.VAlign(VAlign_Center)
-							[
-								SNew(STextBlock)
-								.Text(FText::FromString("NavMesh Agent:  "))
-								.ColorAndOpacity(TextColor)
-							]
-
-							+ SHorizontalBox::Slot()
-							.FillWidth(1.0f)
-							.VAlign(VAlign_Center)
+							+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+							[ SNew(STextBlock).Text(FText::FromString("NavMesh Agent:  ")).ColorAndOpacity(TextColor) ]
+							+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
 							[
 								SNew(SSlider)
 								.MinValue(0.0f)
@@ -142,16 +125,8 @@ void SNavGen3DWindow::Construct(const FArguments& InArgs)
 								.Value(this, &SNavGen3DWindow::GetNavMeshAgentSliderValue)
 								.OnValueChanged(this, &SNavGen3DWindow::OnNavMeshAgentSliderChanged)
 							]
-
-							+ SHorizontalBox::Slot()
-							.AutoWidth()
-							.VAlign(VAlign_Center)
-							.Padding(8.0f, 0.0f, 0.0f, 0.0f)
-							[
-								SNew(STextBlock)
-								.Text(this, &SNavGen3DWindow::GetNavMeshAgentText)
-								.ColorAndOpacity(TextColor)
-							]
+							+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(8.0f, 0.0f, 0.0f, 0.0f)
+							[ SNew(STextBlock).Text(this, &SNavGen3DWindow::GetNavMeshAgentText).ColorAndOpacity(TextColor) ]
 						]
 
 						+ SVerticalBox::Slot()
@@ -159,78 +134,40 @@ void SNavGen3DWindow::Construct(const FArguments& InArgs)
 						.Padding(8.0f, 4.0f, 8.0f, 4.0f)
 						[
 							SNew(SHorizontalBox)
-
-							+ SHorizontalBox::Slot()
-							.AutoWidth()
-							.VAlign(VAlign_Top)
-							.Padding(0.0f, 2.0f, 0.0f, 0.0f)
-							[
-								SNew(STextBlock)
-								.Text(FText::FromString("Draw Mode:  "))
-								.ColorAndOpacity(TextColor)
-							]
-
-							+ SHorizontalBox::Slot()
-							.AutoWidth()
+							+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Top).Padding(0.0f, 2.0f, 0.0f, 0.0f)
+							[ SNew(STextBlock).Text(FText::FromString("Draw Mode:  ")).ColorAndOpacity(TextColor) ]
+							+ SHorizontalBox::Slot().AutoWidth()
 							[
 								SNew(SVerticalBox)
-
-								+ SVerticalBox::Slot()
-								.AutoHeight()
-								.Padding(0.0f, 2.0f, 0.0f, 2.0f)
+								+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f, 0.0f, 2.0f)
 								[
 									SNew(SHorizontalBox)
 									+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
-									[
-										SNew(SCheckBox)
-										.IsChecked(this, &SNavGen3DWindow::GetDrawModeRadioState, ENavGen3DDrawMode::None)
-										.OnCheckStateChanged(this, &SNavGen3DWindow::OnDrawModeRadioChanged, ENavGen3DDrawMode::None)
-									]
+									[ SNew(SCheckBox).IsChecked(this, &SNavGen3DWindow::GetDrawModeRadioState, ENavGen3DDrawMode::None).OnCheckStateChanged(this, &SNavGen3DWindow::OnDrawModeRadioChanged, ENavGen3DDrawMode::None) ]
 									+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(4.0f, 0.0f, 0.0f, 0.0f)
 									[ SNew(STextBlock).Text(FText::FromString("None")).ColorAndOpacity(TextColor) ]
 								]
-
-								+ SVerticalBox::Slot()
-								.AutoHeight()
-								.Padding(0.0f, 2.0f, 0.0f, 2.0f)
+								+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f, 0.0f, 2.0f)
 								[
 									SNew(SHorizontalBox)
 									+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
-									[
-										SNew(SCheckBox)
-										.IsChecked(this, &SNavGen3DWindow::GetDrawModeRadioState, ENavGen3DDrawMode::NavBounds3D)
-										.OnCheckStateChanged(this, &SNavGen3DWindow::OnDrawModeRadioChanged, ENavGen3DDrawMode::NavBounds3D)
-									]
+									[ SNew(SCheckBox).IsChecked(this, &SNavGen3DWindow::GetDrawModeRadioState, ENavGen3DDrawMode::NavBounds3D).OnCheckStateChanged(this, &SNavGen3DWindow::OnDrawModeRadioChanged, ENavGen3DDrawMode::NavBounds3D) ]
 									+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(4.0f, 0.0f, 0.0f, 0.0f)
 									[ SNew(STextBlock).Text(FText::FromString("Nav Bounds 3D")).ColorAndOpacity(TextColor) ]
 								]
-
-								+ SVerticalBox::Slot()
-								.AutoHeight()
-								.Padding(0.0f, 2.0f, 0.0f, 2.0f)
+								+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f, 0.0f, 2.0f)
 								[
 									SNew(SHorizontalBox)
 									+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
-									[
-										SNew(SCheckBox)
-										.IsChecked(this, &SNavGen3DWindow::GetDrawModeRadioState, ENavGen3DDrawMode::NavMesh3D)
-										.OnCheckStateChanged(this, &SNavGen3DWindow::OnDrawModeRadioChanged, ENavGen3DDrawMode::NavMesh3D)
-									]
+									[ SNew(SCheckBox).IsChecked(this, &SNavGen3DWindow::GetDrawModeRadioState, ENavGen3DDrawMode::NavMesh3D).OnCheckStateChanged(this, &SNavGen3DWindow::OnDrawModeRadioChanged, ENavGen3DDrawMode::NavMesh3D) ]
 									+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(4.0f, 0.0f, 0.0f, 0.0f)
 									[ SNew(STextBlock).Text(FText::FromString("Nav Mesh 3D")).ColorAndOpacity(TextColor) ]
 								]
-
-								+ SVerticalBox::Slot()
-								.AutoHeight()
-								.Padding(0.0f, 2.0f, 0.0f, 2.0f)
+								+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f, 0.0f, 2.0f)
 								[
 									SNew(SHorizontalBox)
 									+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
-									[
-										SNew(SCheckBox)
-										.IsChecked(this, &SNavGen3DWindow::GetDrawModeRadioState, ENavGen3DDrawMode::UnprocessedVolumes)
-										.OnCheckStateChanged(this, &SNavGen3DWindow::OnDrawModeRadioChanged, ENavGen3DDrawMode::UnprocessedVolumes)
-									]
+									[ SNew(SCheckBox).IsChecked(this, &SNavGen3DWindow::GetDrawModeRadioState, ENavGen3DDrawMode::UnprocessedVolumes).OnCheckStateChanged(this, &SNavGen3DWindow::OnDrawModeRadioChanged, ENavGen3DDrawMode::UnprocessedVolumes) ]
 									+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(4.0f, 0.0f, 0.0f, 0.0f)
 									[ SNew(STextBlock).Text(FText::FromString("Unprocessed Volumes")).ColorAndOpacity(TextColor) ]
 								]
@@ -242,24 +179,10 @@ void SNavGen3DWindow::Construct(const FArguments& InArgs)
 						.Padding(8.0f, 4.0f, 8.0f, 4.0f)
 						[
 							SNew(SHorizontalBox)
-
-							+ SHorizontalBox::Slot()
-							.AutoWidth()
-							.VAlign(VAlign_Center)
-							[
-								SNew(STextBlock)
-								.Text(FText::FromString("Draw Connections:  "))
-								.ColorAndOpacity(TextColor)
-							]
-
-							+ SHorizontalBox::Slot()
-							.AutoWidth()
-							.VAlign(VAlign_Center)
-							[
-								SNew(SCheckBox)
-								.IsChecked(this, &SNavGen3DWindow::GetDrawConnectionsState)
-								.OnCheckStateChanged(this, &SNavGen3DWindow::OnDrawConnectionsChanged)
-							]
+							+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+							[ SNew(STextBlock).Text(FText::FromString("Draw Connections:  ")).ColorAndOpacity(TextColor) ]
+							+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+							[ SNew(SCheckBox).IsChecked(this, &SNavGen3DWindow::GetDrawConnectionsState).OnCheckStateChanged(this, &SNavGen3DWindow::OnDrawConnectionsChanged) ]
 						]
 
 						+ SVerticalBox::Slot()
@@ -267,24 +190,10 @@ void SNavGen3DWindow::Construct(const FArguments& InArgs)
 						.Padding(8.0f, 4.0f, 8.0f, 4.0f)
 						[
 							SNew(SHorizontalBox)
-
-							+ SHorizontalBox::Slot()
-							.AutoWidth()
-							.VAlign(VAlign_Center)
-							[
-								SNew(STextBlock)
-								.Text(FText::FromString("Draw Connectivity:  "))
-								.ColorAndOpacity(TextColor)
-							]
-
-							+ SHorizontalBox::Slot()
-							.AutoWidth()
-							.VAlign(VAlign_Center)
-							[
-								SNew(SCheckBox)
-								.IsChecked(this, &SNavGen3DWindow::GetDrawConnectivityState)
-								.OnCheckStateChanged(this, &SNavGen3DWindow::OnDrawConnectivityChanged)
-							]
+							+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+							[ SNew(STextBlock).Text(FText::FromString("Draw Connectivity:  ")).ColorAndOpacity(TextColor) ]
+							+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+							[ SNew(SCheckBox).IsChecked(this, &SNavGen3DWindow::GetDrawConnectivityState).OnCheckStateChanged(this, &SNavGen3DWindow::OnDrawConnectivityChanged) ]
 						]
 
 						+ SVerticalBox::Slot()
@@ -292,24 +201,10 @@ void SNavGen3DWindow::Construct(const FArguments& InArgs)
 						.Padding(8.0f, 4.0f, 8.0f, 4.0f)
 						[
 							SNew(SHorizontalBox)
-
-							+ SHorizontalBox::Slot()
-							.AutoWidth()
-							.VAlign(VAlign_Center)
-							[
-								SNew(STextBlock)
-								.Text(FText::FromString("Camera Vol:  "))
-								.ColorAndOpacity(TextColor)
-							]
-
-							+ SHorizontalBox::Slot()
-							.AutoWidth()
-							.VAlign(VAlign_Center)
-							[
-								SNew(STextBlock)
-								.Text(this, &SNavGen3DWindow::GetCameraVolumeText)
-								.ColorAndOpacity(TextColor)
-							]
+							+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+							[ SNew(STextBlock).Text(FText::FromString("Camera Vol:  ")).ColorAndOpacity(TextColor) ]
+							+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+							[ SNew(STextBlock).Text(this, &SNavGen3DWindow::GetCameraVolumeText).ColorAndOpacity(TextColor) ]
 						]
 
 						+ SVerticalBox::Slot()
@@ -317,24 +212,10 @@ void SNavGen3DWindow::Construct(const FArguments& InArgs)
 						.Padding(8.0f, 4.0f, 8.0f, 4.0f)
 						[
 							SNew(SHorizontalBox)
-
-							+ SHorizontalBox::Slot()
-							.AutoWidth()
-							.VAlign(VAlign_Center)
-							[
-								SNew(STextBlock)
-								.Text(FText::FromString("Draw Camera Volume:  "))
-								.ColorAndOpacity(TextColor)
-							]
-
-							+ SHorizontalBox::Slot()
-							.AutoWidth()
-							.VAlign(VAlign_Center)
-							[
-								SNew(SCheckBox)
-								.IsChecked(this, &SNavGen3DWindow::GetDrawCameraVolumeState)
-								.OnCheckStateChanged(this, &SNavGen3DWindow::OnDrawCameraVolumeChanged)
-							]
+							+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+							[ SNew(STextBlock).Text(FText::FromString("Draw Camera Volume:  ")).ColorAndOpacity(TextColor) ]
+							+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+							[ SNew(SCheckBox).IsChecked(this, &SNavGen3DWindow::GetDrawCameraVolumeState).OnCheckStateChanged(this, &SNavGen3DWindow::OnDrawCameraVolumeChanged) ]
 						]
 
 						+ SVerticalBox::Slot()
@@ -342,19 +223,9 @@ void SNavGen3DWindow::Construct(const FArguments& InArgs)
 						.Padding(8.0f, 4.0f, 8.0f, 4.0f)
 						[
 							SNew(SHorizontalBox)
-
-							+ SHorizontalBox::Slot()
-							.AutoWidth()
-							.VAlign(VAlign_Center)
-							[
-								SNew(STextBlock)
-								.Text(FText::FromString("Draw Volume By ID:  "))
-								.ColorAndOpacity(TextColor)
-							]
-
-							+ SHorizontalBox::Slot()
-							.FillWidth(1.0f)
-							.VAlign(VAlign_Center)
+							+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+							[ SNew(STextBlock).Text(FText::FromString("Draw Volume By ID:  ")).ColorAndOpacity(TextColor) ]
+							+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
 							[
 								SNew(SEditableTextBox)
 								.OnTextChanged(this, &SNavGen3DWindow::OnVolumeIDTextChanged)
@@ -366,110 +237,55 @@ void SNavGen3DWindow::Construct(const FArguments& InArgs)
 						.AutoHeight()
 						.Padding(8.0f, 4.0f, 8.0f, 4.0f)
 						[
-							SNew(SVerticalBox)
-
-							+ SVerticalBox::Slot()
-							.AutoHeight()
+							SNew(SHorizontalBox)
+							+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+							[ SNew(STextBlock).Text(FText::FromString("Debug Level:")).ColorAndOpacity(TextColor) ]
+							+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center).Padding(8.0f, 0.0f, 0.0f, 0.0f)
 							[
-								SNew(SHorizontalBox)
-
-								+ SHorizontalBox::Slot()
-								.AutoWidth()
-								.VAlign(VAlign_Center)
-								[
-									SNew(STextBlock)
-									.Text(FText::FromString("Debug Level:"))
-									.ColorAndOpacity(TextColor)
-								]
-
-								+ SHorizontalBox::Slot()
-								.FillWidth(1.0f)
-								.VAlign(VAlign_Center)
-								.Padding(8.0f, 0.0f, 0.0f, 0.0f)
-								[
-									SNew(SSlider)
-									.MinValue(0.0f)
-									.MaxValue(4.0f)
-									.StepSize(1.0f)
-									.Value(this, &SNavGen3DWindow::GetDebugLevel)
-									.OnValueChanged(this, &SNavGen3DWindow::OnDebugLevelChanged)
-								]
-
-								+ SHorizontalBox::Slot()
-								.AutoWidth()
-								.VAlign(VAlign_Center)
-								.Padding(8.0f, 0.0f, 0.0f, 0.0f)
-								[
-									SNew(STextBlock)
-									.Text(this, &SNavGen3DWindow::GetDebugLevelText)
-									.ColorAndOpacity(TextColor)
-								]
+								SNew(SSlider)
+								.MinValue(0.0f).MaxValue(4.0f).StepSize(1.0f)
+								.Value(this, &SNavGen3DWindow::GetDebugLevel)
+								.OnValueChanged(this, &SNavGen3DWindow::OnDebugLevelChanged)
 							]
+							+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(8.0f, 0.0f, 0.0f, 0.0f)
+							[ SNew(STextBlock).Text(this, &SNavGen3DWindow::GetDebugLevelText).ColorAndOpacity(TextColor) ]
+						]
 
-							+ SVerticalBox::Slot()
-							.AutoHeight()
-							.Padding(0.0f, 4.0f, 0.0f, 0.0f)
+						+ SVerticalBox::Slot()
+						.AutoHeight()
+						.Padding(8.0f, 4.0f, 8.0f, 4.0f)
+						[
+							SNew(SHorizontalBox)
+							+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+							[ SNew(STextBlock).Text(FText::FromString("Draw Time:  ")).ColorAndOpacity(TextColor) ]
+							+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
 							[
-								SNew(SHorizontalBox)
-
-								+ SHorizontalBox::Slot()
-								.AutoWidth()
-								.VAlign(VAlign_Center)
-								[
-									SNew(STextBlock)
-									.Text(FText::FromString("Draw Time:  "))
-									.ColorAndOpacity(TextColor)
-								]
-
-								+ SHorizontalBox::Slot()
-								.FillWidth(1.0f)
-								.VAlign(VAlign_Center)
-								[
-									SNew(SSlider)
-									.MinValue(0.0f)
-									.MaxValue(120.0f)
-									.Value(this, &SNavGen3DWindow::GetDebugDrawTime)
-									.OnValueChanged(this, &SNavGen3DWindow::OnDebugDrawTimeChanged)
-								]
-
-								+ SHorizontalBox::Slot()
-								.AutoWidth()
-								.VAlign(VAlign_Center)
-								.Padding(8.0f, 0.0f, 0.0f, 0.0f)
-								[
-									SNew(STextBlock)
-									.Text(this, &SNavGen3DWindow::GetDebugDrawTimeText)
-									.ColorAndOpacity(TextColor)
-								]
+								SNew(SSlider)
+								.MinValue(0.0f).MaxValue(120.0f)
+								.Value(this, &SNavGen3DWindow::GetDebugDrawTime)
+								.OnValueChanged(this, &SNavGen3DWindow::OnDebugDrawTimeChanged)
 							]
+							+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(8.0f, 0.0f, 0.0f, 0.0f)
+							[ SNew(STextBlock).Text(this, &SNavGen3DWindow::GetDebugDrawTimeText).ColorAndOpacity(TextColor) ]
 						]
+					]
+				]
 
-						+ SVerticalBox::Slot()
-						.AutoHeight()
-						.Padding(8.0f, 8.0f, 8.0f, 2.0f)
-						[
-							SNew(STextBlock)
-							.Text(this, &SNavGen3DWindow::GetGenerationStatusText)
-							.ColorAndOpacity(FSlateColor(FLinearColor(1.0f, 0.8f, 0.2f)))
-							.Visibility(this, &SNavGen3DWindow::GetGenerationStatusVisibility)
-						]
-
-						+ SVerticalBox::Slot()
-						.AutoHeight()
-						.Padding(8.0f, 8.0f, 8.0f, 2.0f)
-						[
-							SNew(STextBlock)
-							.Text(FText::FromString("Generation"))
-							.ColorAndOpacity(LabelColor)
-						]
-
-						+ SVerticalBox::Slot()
-						.AutoHeight()
-						.Padding(8.0f, 0.0f, 8.0f, 4.0f)
-						[
-							SNew(SSeparator)
-							.Orientation(Orient_Horizontal)
-						]
+				// ---- Generation + Gen Iteration (Debug) + Volume Iteration (Debug) ----
+				+ SVerticalBox::Slot()
+				.AutoHeight()
+				[
+					SNew(SExpandableArea)
+					.InitiallyCollapsed(false)
+					.HeaderContent()
+					[
+						SNew(STextBlock)
+						.Text(FText::FromString("Generation"))
+						.ColorAndOpacity(LabelColor)
+					]
+					.BodyContent()
+					[
+						SNew(SVerticalBox)
 
 						+ SVerticalBox::Slot()
 						.AutoHeight()
@@ -477,48 +293,18 @@ void SNavGen3DWindow::Construct(const FArguments& InArgs)
 						[
 							SNew(SUniformGridPanel)
 							.SlotPadding(FMargin(0.0f, 4.0f, 0.0f, 0.0f))
-
 							+ SUniformGridPanel::Slot(0, 0)
-							[
-								SNew(SButton)
-								.Text(FText::FromString("Reset"))
-								.OnClicked(this, &SNavGen3DWindow::OnResetNavMesh3DClicked)
-								.IsEnabled(this, &SNavGen3DWindow::IsNotPlayMode)
-							]
-
+							[ SNew(SButton).Text(FText::FromString("Reset")).OnClicked(this, &SNavGen3DWindow::OnResetNavMesh3DClicked).IsEnabled(this, &SNavGen3DWindow::IsNotPlayMode) ]
 							+ SUniformGridPanel::Slot(0, 1)
-							[
-								SNew(SButton)
-								.Text(FText::FromString("Generate NavMesh3D"))
-								.OnClicked(this, &SNavGen3DWindow::OnGenerateNavMesh3DForSelectionClicked)
-								.IsEnabled(this, &SNavGen3DWindow::IsGenerationEnabled)
-							]
-
+							[ SNew(SButton).Text(FText::FromString("Generate NavMesh3D")).OnClicked(this, &SNavGen3DWindow::OnGenerateNavMesh3DForSelectionClicked).IsEnabled(this, &SNavGen3DWindow::IsGenerationEnabled) ]
 							+ SUniformGridPanel::Slot(0, 2)
-							[
-								SNew(SButton)
-								.Text(FText::FromString("Validate NavMesh3D"))
-								.OnClicked(this, &SNavGen3DWindow::OnValidateNavMesh3DClicked)
-								.IsEnabled(this, &SNavGen3DWindow::IsGenerationEnabled)
-							]
+							[ SNew(SButton).Text(FText::FromString("Validate NavMesh3D")).OnClicked(this, &SNavGen3DWindow::OnValidateNavMesh3DClicked).IsEnabled(this, &SNavGen3DWindow::IsGenerationEnabled) ]
 						]
 
-						+ SVerticalBox::Slot()
-						.AutoHeight()
-						.Padding(8.0f, 8.0f, 8.0f, 2.0f)
-						[
-							SNew(STextBlock)
-							.Text(FText::FromString("Gen Iteration (Debug)"))
-							.ColorAndOpacity(LabelColor)
-						]
-
-						+ SVerticalBox::Slot()
-						.AutoHeight()
-						.Padding(8.0f, 0.0f, 8.0f, 4.0f)
-						[
-							SNew(SSeparator)
-							.Orientation(Orient_Horizontal)
-						]
+						+ SVerticalBox::Slot().AutoHeight().Padding(8.0f, 8.0f, 8.0f, 2.0f)
+						[ SNew(STextBlock).Text(FText::FromString("Gen Iteration (Debug)")).ColorAndOpacity(LabelColor) ]
+						+ SVerticalBox::Slot().AutoHeight().Padding(8.0f, 0.0f, 8.0f, 4.0f)
+						[ SNew(SSeparator).Orientation(Orient_Horizontal) ]
 
 						+ SVerticalBox::Slot()
 						.AutoHeight()
@@ -526,40 +312,16 @@ void SNavGen3DWindow::Construct(const FArguments& InArgs)
 						[
 							SNew(SUniformGridPanel)
 							.SlotPadding(FMargin(0.0f, 4.0f, 0.0f, 0.0f))
-
 							+ SUniformGridPanel::Slot(0, 0)
-							[
-								SNew(SButton)
-								.Text(FText::FromString("Generate Volumes"))
-								.OnClicked(this, &SNavGen3DWindow::OnGenerateVolumesClicked)
-								.IsEnabled(this, &SNavGen3DWindow::IsGenerationEnabled)
-							]
-
+							[ SNew(SButton).Text(FText::FromString("Generate Volumes")).OnClicked(this, &SNavGen3DWindow::OnGenerateVolumesClicked).IsEnabled(this, &SNavGen3DWindow::IsGenerationEnabled) ]
 							+ SUniformGridPanel::Slot(0, 1)
-							[
-								SNew(SButton)
-								.Text(FText::FromString("Find Connections"))
-								.OnClicked(this, &SNavGen3DWindow::OnFindConnectionsClicked)
-								.IsEnabled(this, &SNavGen3DWindow::IsNotPlayMode)
-							]
+							[ SNew(SButton).Text(FText::FromString("Find Connections")).OnClicked(this, &SNavGen3DWindow::OnFindConnectionsClicked).IsEnabled(this, &SNavGen3DWindow::IsNotPlayMode) ]
 						]
 
-						+ SVerticalBox::Slot()
-						.AutoHeight()
-						.Padding(8.0f, 8.0f, 8.0f, 2.0f)
-						[
-							SNew(STextBlock)
-							.Text(FText::FromString("Volume Iteration (Debug)"))
-							.ColorAndOpacity(LabelColor)
-						]
-
-						+ SVerticalBox::Slot()
-						.AutoHeight()
-						.Padding(8.0f, 0.0f, 8.0f, 4.0f)
-						[
-							SNew(SSeparator)
-							.Orientation(Orient_Horizontal)
-						]
+						+ SVerticalBox::Slot().AutoHeight().Padding(8.0f, 8.0f, 8.0f, 2.0f)
+						[ SNew(STextBlock).Text(FText::FromString("Volume Iteration (Debug)")).ColorAndOpacity(LabelColor) ]
+						+ SVerticalBox::Slot().AutoHeight().Padding(8.0f, 0.0f, 8.0f, 4.0f)
+						[ SNew(SSeparator).Orientation(Orient_Horizontal) ]
 
 						+ SVerticalBox::Slot()
 						.AutoHeight()
@@ -568,84 +330,43 @@ void SNavGen3DWindow::Construct(const FArguments& InArgs)
 							SNew(SUniformGridPanel)
 							.SlotPadding(FMargin(0.0f, 4.0f, 0.0f, 0.0f))
 							.IsEnabled(this, &SNavGen3DWindow::IsGenerationEnabled)
-
 							+ SUniformGridPanel::Slot(0, 0)
-							[
-								SNew(SButton)
-								.Text(FText::FromString("Process Next Volume"))
-								.OnClicked(this, &SNavGen3DWindow::OnProcessNextVolumeClicked)
-							]
-
+							[ SNew(SButton).Text(FText::FromString("Process Next Volume")).OnClicked(this, &SNavGen3DWindow::OnProcessNextVolumeClicked) ]
 							+ SUniformGridPanel::Slot(0, 1)
-							[
-								SNew(SButton)
-								.Text(FText::FromString("Process Remaining Volumes"))
-								.OnClicked(this, &SNavGen3DWindow::OnProcessRemainingVolumesClicked)
-							]
-
+							[ SNew(SButton).Text(FText::FromString("Process Remaining Volumes")).OnClicked(this, &SNavGen3DWindow::OnProcessRemainingVolumesClicked) ]
 							+ SUniformGridPanel::Slot(0, 2)
-							[
-								SNew(SButton)
-								.Text(FText::FromString("Process Camera Volume"))
-								.OnClicked(this, &SNavGen3DWindow::OnProcessCameraVolumeClicked)
-							]
-
+							[ SNew(SButton).Text(FText::FromString("Process Camera Volume")).OnClicked(this, &SNavGen3DWindow::OnProcessCameraVolumeClicked) ]
 							+ SUniformGridPanel::Slot(0, 3)
-							[
-								SNew(SButton)
-								.Text(FText::FromString("Validate Camera Volume"))
-								.OnClicked(this, &SNavGen3DWindow::OnValidateCameraVolumeClicked)
-							]
-
+							[ SNew(SButton).Text(FText::FromString("Validate Camera Volume")).OnClicked(this, &SNavGen3DWindow::OnValidateCameraVolumeClicked) ]
 							+ SUniformGridPanel::Slot(0, 4)
-							[
-								SNew(SButton)
-								.Text(FText::FromString("Find Camera Volume Connections"))
-								.OnClicked(this, &SNavGen3DWindow::OnFindCameraVolumeConnectionsClicked)
-							]
-
+							[ SNew(SButton).Text(FText::FromString("Find Camera Volume Connections")).OnClicked(this, &SNavGen3DWindow::OnFindCameraVolumeConnectionsClicked) ]
 							+ SUniformGridPanel::Slot(0, 5)
-							[
-								SNew(SButton)
-								.Text(FText::FromString("Undo Last Process"))
-								.IsEnabled(this, &SNavGen3DWindow::IsUndoLastProcessEnabled)
-								.OnClicked(this, &SNavGen3DWindow::OnUndoLastProcessClicked)
-							]
+							[ SNew(SButton).Text(FText::FromString("Undo Last Process")).IsEnabled(this, &SNavGen3DWindow::IsUndoLastProcessEnabled).OnClicked(this, &SNavGen3DWindow::OnUndoLastProcessClicked) ]
 						]
-
 					]
+				]
 
-					+ SVerticalBox::Slot()
-					.AutoHeight()
+				// ---- Path Finding (Debug) ----
+				+ SVerticalBox::Slot()
+				.AutoHeight()
+				[
+					SNew(SExpandableArea)
+					.InitiallyCollapsed(false)
+					.HeaderContent()
+					[
+						SNew(STextBlock)
+						.Text(FText::FromString("Path Finding (Debug)"))
+						.ColorAndOpacity(LabelColor)
+					]
+					.BodyContent()
 					[
 						SNew(SVerticalBox)
 						.IsEnabled(this, &SNavGen3DWindow::IsPathFindingEnabled)
 
 						+ SVerticalBox::Slot()
 						.AutoHeight()
-						.Padding(8.0f, 8.0f, 8.0f, 2.0f)
-						[
-							SNew(STextBlock)
-							.Text(FText::FromString("Path Finding (Debug)"))
-							.ColorAndOpacity(LabelColor)
-						]
-
-						+ SVerticalBox::Slot()
-						.AutoHeight()
-						.Padding(8.0f, 0.0f, 8.0f, 4.0f)
-						[
-							SNew(SSeparator)
-							.Orientation(Orient_Horizontal)
-						]
-
-						+ SVerticalBox::Slot()
-						.AutoHeight()
 						.Padding(8.0f, 4.0f, 8.0f, 4.0f)
-						[
-							SNew(SButton)
-							.Text(FText::FromString("Reset"))
-							.OnClicked(this, &SNavGen3DWindow::OnResetPathClicked)
-						]
+						[ SNew(SButton).Text(FText::FromString("Reset")).OnClicked(this, &SNavGen3DWindow::OnResetPathClicked) ]
 
 						+ SVerticalBox::Slot()
 						.AutoHeight()
@@ -662,22 +383,10 @@ void SNavGen3DWindow::Construct(const FArguments& InArgs)
 						.Padding(8.0f, 4.0f, 8.0f, 4.0f)
 						[
 							SNew(SHorizontalBox)
-							+ SHorizontalBox::Slot()
-							.AutoWidth()
-							.VAlign(VAlign_Center)
-							[
-								SNew(STextBlock)
-								.Text(FText::FromString("Path Smoothing:  "))
-								.ColorAndOpacity(TextColor)
-							]
-							+ SHorizontalBox::Slot()
-							.AutoWidth()
-							.VAlign(VAlign_Center)
-							[
-								SNew(SCheckBox)
-								.IsChecked(this, &SNavGen3DWindow::GetPathSmoothingState)
-								.OnCheckStateChanged(this, &SNavGen3DWindow::OnPathSmoothingChanged)
-							]
+							+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+							[ SNew(STextBlock).Text(FText::FromString("Path Smoothing:  ")).ColorAndOpacity(TextColor) ]
+							+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+							[ SNew(SCheckBox).IsChecked(this, &SNavGen3DWindow::GetPathSmoothingState).OnCheckStateChanged(this, &SNavGen3DWindow::OnPathSmoothingChanged) ]
 						]
 
 						+ SVerticalBox::Slot()
@@ -690,60 +399,22 @@ void SNavGen3DWindow::Construct(const FArguments& InArgs)
 							+ SUniformGridPanel::Slot(0, 0)
 							[
 								SNew(SHorizontalBox)
-								+ SHorizontalBox::Slot()
-								.AutoWidth()
-								.VAlign(VAlign_Center)
-								[
-									SNew(SButton)
-									.Text(FText::FromString("Set PathOrigin"))
-									.IsEnabled(this, &SNavGen3DWindow::IsCameraLocationValidForAgent)
-									.OnClicked(this, &SNavGen3DWindow::OnSetPathOriginClicked)
-								]
-								+ SHorizontalBox::Slot()
-								.AutoWidth()
-								.VAlign(VAlign_Center)
-								.Padding(8.0f, 0.0f, 0.0f, 0.0f)
-								[
-									SNew(STextBlock)
-									.Text(this, &SNavGen3DWindow::GetDebugPathOriginText)
-									.ColorAndOpacity(TextColor)
-								]
+								+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+								[ SNew(SButton).Text(FText::FromString("Set PathOrigin")).IsEnabled(this, &SNavGen3DWindow::IsCameraLocationValidForAgent).OnClicked(this, &SNavGen3DWindow::OnSetPathOriginClicked) ]
+								+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(8.0f, 0.0f, 0.0f, 0.0f)
+								[ SNew(STextBlock).Text(this, &SNavGen3DWindow::GetDebugPathOriginText).ColorAndOpacity(TextColor) ]
 							]
 
 							+ SUniformGridPanel::Slot(0, 1)
 							[
 								SNew(SHorizontalBox)
-								+ SHorizontalBox::Slot()
-								.AutoWidth()
-								.VAlign(VAlign_Center)
-								[
-									SNew(SButton)
-									.Text(FText::FromString("Path To Camera"))
-									.IsEnabled(this, &SNavGen3DWindow::IsCameraLocationValidForAgent)
-									.OnClicked(this, &SNavGen3DWindow::OnPathToCameraClicked)
-								]
-								+ SHorizontalBox::Slot()
-								.AutoWidth()
-								.VAlign(VAlign_Center)
-								.Padding(8.0f, 0.0f, 0.0f, 0.0f)
-								[
-									SNew(STextBlock)
-									.Text(this, &SNavGen3DWindow::GetDebugPathDestinationText)
-									.ColorAndOpacity(TextColor)
-								]
-								+ SHorizontalBox::Slot()
-								.AutoWidth()
-								.VAlign(VAlign_Center)
-								.Padding(8.0f, 0.0f, 0.0f, 0.0f)
-								[
-									SNew(STextBlock)
-									.Text(FText::FromString("Continuous"))
-									.ColorAndOpacity(TextColor)
-								]
-								+ SHorizontalBox::Slot()
-								.AutoWidth()
-								.VAlign(VAlign_Center)
-								.Padding(4.0f, 0.0f, 0.0f, 0.0f)
+								+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+								[ SNew(SButton).Text(FText::FromString("Path To Camera")).IsEnabled(this, &SNavGen3DWindow::IsCameraLocationValidForAgent).OnClicked(this, &SNavGen3DWindow::OnPathToCameraClicked) ]
+								+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(8.0f, 0.0f, 0.0f, 0.0f)
+								[ SNew(STextBlock).Text(this, &SNavGen3DWindow::GetDebugPathDestinationText).ColorAndOpacity(TextColor) ]
+								+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(8.0f, 0.0f, 0.0f, 0.0f)
+								[ SNew(STextBlock).Text(FText::FromString("Continuous")).ColorAndOpacity(TextColor) ]
+								+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(4.0f, 0.0f, 0.0f, 0.0f)
 								[
 									SNew(SCheckBox)
 									.IsChecked_Lambda([]() -> ECheckBoxState {
@@ -756,39 +427,144 @@ void SNavGen3DWindow::Construct(const FArguments& InArgs)
 							]
 
 							+ SUniformGridPanel::Slot(0, 2)
-							[
-								SNew(SButton)
-								.Text(FText::FromString("Re-Path With Validate"))
-								.OnClicked(this, &SNavGen3DWindow::OnRePathClicked)
-							]
+							[ SNew(SButton).Text(FText::FromString("Re-Path With Validate")).OnClicked(this, &SNavGen3DWindow::OnRePathClicked) ]
 						]
 					]
+				]
 
-					+ SVerticalBox::Slot()
-					.AutoHeight()
+				// ---- Mover 3D Settings ----
+				+ SVerticalBox::Slot()
+				.AutoHeight()
+				[
+					SNew(SExpandableArea)
+					.InitiallyCollapsed(false)
+					.HeaderContent()
+					[
+						SNew(STextBlock)
+						.Text(FText::FromString("Mover 3D Settings"))
+						.ColorAndOpacity(LabelColor)
+					]
+					.BodyContent()
 					[
 						SNew(SVerticalBox)
 
-						+ SVerticalBox::Slot()
-						.AutoHeight()
-						.Padding(8.0f, 8.0f, 8.0f, 2.0f)
+						+ SVerticalBox::Slot().AutoHeight().Padding(8.0f, 4.0f, 8.0f, 4.0f)
 						[
-							SNew(STextBlock)
-							.Text(FText::FromString("Stats"))
-							.ColorAndOpacity(LabelColor)
+							SNew(SHorizontalBox)
+							+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+							[ SNew(STextBlock).Text(FText::FromString("Agent Index:  ")).ColorAndOpacity(TextColor) ]
+							+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
+							[
+								SNew(SSlider)
+								.MinValue(0.0f)
+								.MaxValue(GetNavMeshAgentSliderMax())
+								.StepSize(1.0f)
+								.Value(this, &SNavGen3DWindow::GetMoverAgentIndexValue)
+								.OnValueChanged(this, &SNavGen3DWindow::OnMoverAgentIndexChanged)
+							]
+							+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(8.0f, 0.0f, 0.0f, 0.0f)
+							[ SNew(STextBlock).Text(this, &SNavGen3DWindow::GetMoverAgentIndexText).ColorAndOpacity(TextColor) ]
 						]
 
-						+ SVerticalBox::Slot()
-						.AutoHeight()
-						.Padding(8.0f, 0.0f, 8.0f, 4.0f)
+						+ SVerticalBox::Slot().AutoHeight().Padding(8.0f, 4.0f, 8.0f, 4.0f)
 						[
-							SNew(SSeparator)
-							.Orientation(Orient_Horizontal)
+							SNew(SHorizontalBox)
+							+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+							[ SNew(STextBlock).Text(FText::FromString("Max Velocity:  ")).ColorAndOpacity(TextColor) ]
+							+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
+							[
+								SNew(SSlider)
+								.MinValue(0.0f).MaxValue(3000.0f)
+								.Value(this, &SNavGen3DWindow::GetMoverMaxVelocityValue)
+								.OnValueChanged(this, &SNavGen3DWindow::OnMoverMaxVelocityChanged)
+							]
+							+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(8.0f, 0.0f, 0.0f, 0.0f)
+							[ SNew(STextBlock).Text(this, &SNavGen3DWindow::GetMoverMaxVelocityText).ColorAndOpacity(TextColor) ]
 						]
 
-						+ SVerticalBox::Slot()
-						.AutoHeight()
-						.Padding(8.0f, 4.0f, 8.0f, 4.0f)
+						+ SVerticalBox::Slot().AutoHeight().Padding(8.0f, 4.0f, 8.0f, 4.0f)
+						[
+							SNew(SHorizontalBox)
+							+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+							[ SNew(STextBlock).Text(FText::FromString("Acceleration:  ")).ColorAndOpacity(TextColor) ]
+							+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
+							[
+								SNew(SSlider)
+								.MinValue(0.0f).MaxValue(3000.0f)
+								.Value(this, &SNavGen3DWindow::GetMoverAccelerationValue)
+								.OnValueChanged(this, &SNavGen3DWindow::OnMoverAccelerationChanged)
+							]
+							+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(8.0f, 0.0f, 0.0f, 0.0f)
+							[ SNew(STextBlock).Text(this, &SNavGen3DWindow::GetMoverAccelerationText).ColorAndOpacity(TextColor) ]
+						]
+
+						+ SVerticalBox::Slot().AutoHeight().Padding(8.0f, 4.0f, 8.0f, 4.0f)
+						[
+							SNew(SHorizontalBox)
+							+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+							[ SNew(STextBlock).Text(FText::FromString("Turn Rate:  ")).ColorAndOpacity(TextColor) ]
+							+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
+							[
+								SNew(SSlider)
+								.MinValue(0.0f).MaxValue(720.0f)
+								.Value(this, &SNavGen3DWindow::GetMoverTurnRateValue)
+								.OnValueChanged(this, &SNavGen3DWindow::OnMoverTurnRateChanged)
+							]
+							+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(8.0f, 0.0f, 0.0f, 0.0f)
+							[ SNew(STextBlock).Text(this, &SNavGen3DWindow::GetMoverTurnRateText).ColorAndOpacity(TextColor) ]
+						]
+
+						+ SVerticalBox::Slot().AutoHeight().Padding(8.0f, 4.0f, 8.0f, 4.0f)
+						[
+							SNew(SHorizontalBox)
+							+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+							[ SNew(STextBlock).Text(FText::FromString("Pathing Angle:  ")).ColorAndOpacity(TextColor) ]
+							+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
+							[
+								SNew(SSlider)
+								.MinValue(0.0f).MaxValue(180.0f)
+								.Value(this, &SNavGen3DWindow::GetMoverPathingAngleValue)
+								.OnValueChanged(this, &SNavGen3DWindow::OnMoverPathingAngleChanged)
+							]
+							+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(8.0f, 0.0f, 0.0f, 0.0f)
+							[ SNew(STextBlock).Text(this, &SNavGen3DWindow::GetMoverPathingAngleText).ColorAndOpacity(TextColor) ]
+						]
+
+						+ SVerticalBox::Slot().AutoHeight().Padding(8.0f, 4.0f, 8.0f, 4.0f)
+						[
+							SNew(SHorizontalBox)
+							+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+							[ SNew(STextBlock).Text(FText::FromString("Approach Distance:  ")).ColorAndOpacity(TextColor) ]
+							+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
+							[
+								SNew(SSlider)
+								.MinValue(0.0f).MaxValue(10000.0f)
+								.Value(this, &SNavGen3DWindow::GetMoverApproachDistanceValue)
+								.OnValueChanged(this, &SNavGen3DWindow::OnMoverApproachDistanceChanged)
+							]
+							+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(8.0f, 0.0f, 0.0f, 0.0f)
+							[ SNew(STextBlock).Text(this, &SNavGen3DWindow::GetMoverApproachDistanceText).ColorAndOpacity(TextColor) ]
+						]
+					]
+				]
+
+				// ---- Stats ----
+				+ SVerticalBox::Slot()
+				.AutoHeight()
+				[
+					SNew(SExpandableArea)
+					.InitiallyCollapsed(false)
+					.HeaderContent()
+					[
+						SNew(STextBlock)
+						.Text(FText::FromString("Stats"))
+						.ColorAndOpacity(LabelColor)
+					]
+					.BodyContent()
+					[
+						SNew(SVerticalBox)
+
+						+ SVerticalBox::Slot().AutoHeight().Padding(8.0f, 4.0f, 8.0f, 4.0f)
 						[
 							SNew(SHorizontalBox)
 							+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
@@ -797,9 +573,7 @@ void SNavGen3DWindow::Construct(const FArguments& InArgs)
 							[ SNew(STextBlock).Text(this, &SNavGen3DWindow::GetBoundsVolumeCountText).ColorAndOpacity(TextColor) ]
 						]
 
-						+ SVerticalBox::Slot()
-						.AutoHeight()
-						.Padding(8.0f, 4.0f, 8.0f, 4.0f)
+						+ SVerticalBox::Slot().AutoHeight().Padding(8.0f, 4.0f, 8.0f, 4.0f)
 						[
 							SNew(SHorizontalBox)
 							+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
@@ -808,9 +582,7 @@ void SNavGen3DWindow::Construct(const FArguments& InArgs)
 							[ SNew(STextBlock).Text(this, &SNavGen3DWindow::GetUnprocessedVolumeCountText).ColorAndOpacity(TextColor) ]
 						]
 
-						+ SVerticalBox::Slot()
-						.AutoHeight()
-						.Padding(8.0f, 4.0f, 8.0f, 4.0f)
+						+ SVerticalBox::Slot().AutoHeight().Padding(8.0f, 4.0f, 8.0f, 4.0f)
 						[
 							SNew(SHorizontalBox)
 							+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
@@ -820,86 +592,13 @@ void SNavGen3DWindow::Construct(const FArguments& InArgs)
 						]
 					]
 				]
-
-				+ SSplitter::Slot()
-				.Value(0.5f)
-				[
-					SNew(SBox)
-					.Visibility(this, &SNavGen3DWindow::GetLogPanelVisibility)
-					[
-						SNew(SVerticalBox)
-
-						+ SVerticalBox::Slot()
-						.AutoHeight()
-						.Padding(4.0f, 8.0f, 4.0f, 4.0f)
-						[
-							SNew(SButton)
-							.Text(FText::FromString("Clear"))
-							.OnClicked(this, &SNavGen3DWindow::OnClearLogClicked)
-						]
-
-						+ SVerticalBox::Slot()
-						.AutoHeight()
-						.Padding(4.0f, 0.0f, 4.0f, 4.0f)
-						[
-							SNew(SSearchBox)
-							.OnTextChanged(this, &SNavGen3DWindow::OnSearchTextChanged)
-						]
-
-						+ SVerticalBox::Slot()
-						.FillHeight(1.0f)
-						.Padding(4.0f, 0.0f, 4.0f, 4.0f)
-						[
-							SAssignNew(LogListView, SListView<TSharedPtr<FNavGen3DLogEntry>>)
-							.ListItemsSource(&FilteredLogEntries)
-							.OnGenerateRow(this, &SNavGen3DWindow::GenerateLogRow)
-						]
-					]
-				]
 			]
 		]
 	];
 }
 
-FReply SNavGen3DWindow::OnToggleLogPanelClicked()
-{
-	bLogPanelVisible = !bLogPanelVisible;
-
-	TSharedPtr<SWindow> ParentWindow = FSlateApplication::Get().FindWidgetWindow(AsShared());
-	const TSharedPtr<SWindow> RootWindow = FGlobalTabmanager::Get()->GetRootWindow();
-	if (ParentWindow.IsValid() && ParentWindow != RootWindow)
-	{
-		const FVector2D CurrentSize = ParentWindow->GetClientSizeInScreen();
-		if (!bLogPanelVisible)
-		{
-			CachedExpandedWindowWidth = CurrentSize.X;
-			ParentWindow->SetSizeLimits(FWindowSizeLimits().SetMinWidth(300.0f).SetMinHeight(520.0f));
-			ParentWindow->Resize(FVector2D(CurrentSize.X * 0.5f, CurrentSize.Y));
-		}
-		else
-		{
-			ParentWindow->SetSizeLimits(FWindowSizeLimits().SetMinWidth(620.0f).SetMinHeight(520.0f));
-			ParentWindow->Resize(FVector2D(CachedExpandedWindowWidth, CurrentSize.Y));
-		}
-	}
-
-	return FReply::Handled();
-}
-
-EVisibility SNavGen3DWindow::GetLogPanelVisibility() const
-{
-	return bLogPanelVisible ? EVisibility::Visible : EVisibility::Collapsed;
-}
-
-FText SNavGen3DWindow::GetToggleLogButtonText() const
-{
-	return FText::FromString(bLogPanelVisible ? TEXT("Hide Log") : TEXT("Show Log"));
-}
-
 void SNavGen3DWindow::AddLogEntry(ENavGen3DLogCategory InCategory, const FString& InActorName, const FString& InMessage)
 {
-	LogEntries.Add(MakeShared<FNavGen3DLogEntry>(InCategory, InActorName, InMessage));
-	RefreshFilteredLog();
 }
 
 float SNavGen3DWindow::GetDebugLevel() const
@@ -1028,44 +727,6 @@ FReply SNavGen3DWindow::OnClearDebugClicked()
 	return FReply::Handled();
 }
 
-FReply SNavGen3DWindow::OnClearLogClicked()
-{
-	LogEntries.Reset();
-	RefreshFilteredLog();
-	return FReply::Handled();
-}
-
-void SNavGen3DWindow::OnSearchTextChanged(const FText& InText)
-{
-	SearchText = InText.ToString();
-	RefreshFilteredLog();
-}
-
-void SNavGen3DWindow::RefreshFilteredLog()
-{
-	FilteredLogEntries.Reset();
-	for (const TSharedPtr<FNavGen3DLogEntry>& Entry : LogEntries)
-	{
-		if (SearchText.IsEmpty() || Entry->Message.Contains(SearchText))
-		{
-			FilteredLogEntries.Add(Entry);
-		}
-	}
-	if (LogListView.IsValid())
-	{
-		LogListView->RequestListRefresh();
-		LogListView->ScrollToBottom();
-	}
-}
-
-TSharedRef<ITableRow> SNavGen3DWindow::GenerateLogRow(TSharedPtr<FNavGen3DLogEntry> InItem, const TSharedRef<STableViewBase>& InOwnerTable)
-{
-	return SNew(STableRow<TSharedPtr<FNavGen3DLogEntry>>, InOwnerTable)
-		[
-			SNew(STextBlock)
-			.Text(FText::FromString(InItem->Message))
-		];
-}
 
 ECheckBoxState SNavGen3DWindow::GetDrawModeRadioState(ENavGen3DDrawMode InMode) const
 {
@@ -1559,6 +1220,160 @@ FReply SNavGen3DWindow::OnValidateNavMesh3DClicked()
 		Subsystem->ValidateNavMesh3D();
 	}
 	return FReply::Handled();
+}
+
+float SNavGen3DWindow::GetMoverAgentIndexValue() const
+{
+	if (UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
+		if (ANavGen3DMover* Mover = GetFirstMover(Subsystem))
+			return (float)Mover->AgentIndex;
+	return 0.0f;
+}
+
+void SNavGen3DWindow::OnMoverAgentIndexChanged(float InNewValue)
+{
+	if (UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
+		ForEachMover(Subsystem, [InNewValue](ANavGen3DMover* M) { M->AgentIndex = FMath::RoundToInt(InNewValue); });
+}
+
+FText SNavGen3DWindow::GetMoverAgentIndexText() const
+{
+	if (UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
+		if (ANavGen3DMover* Mover = GetFirstMover(Subsystem))
+			return FText::AsNumber(Mover->AgentIndex);
+	return FText::FromString(TEXT("-"));
+}
+
+float SNavGen3DWindow::GetMoverMaxVelocityValue() const
+{
+	if (UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
+	{
+		if (Subsystem->DebugMoverMaxVelocity.IsSet())
+			return Subsystem->DebugMoverMaxVelocity.GetValue();
+		if (ANavGen3DMover* Mover = GetFirstMover(Subsystem))
+			return Mover->SimMaxVelocity;
+	}
+	return 0.0f;
+}
+
+void SNavGen3DWindow::OnMoverMaxVelocityChanged(float InNewValue)
+{
+	if (UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
+	{
+		Subsystem->DebugMoverMaxVelocity = InNewValue;
+		ForEachMover(Subsystem, [InNewValue](ANavGen3DMover* M) { M->SimMaxVelocity = InNewValue; });
+	}
+}
+
+FText SNavGen3DWindow::GetMoverMaxVelocityText() const
+{
+	if (UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
+	{
+		if (Subsystem->DebugMoverMaxVelocity.IsSet())
+			return FText::FromString(FString::Printf(TEXT("%.0f"), Subsystem->DebugMoverMaxVelocity.GetValue()));
+		if (ANavGen3DMover* Mover = GetFirstMover(Subsystem))
+			return FText::FromString(FString::Printf(TEXT("%.0f"), Mover->SimMaxVelocity));
+	}
+	return FText::FromString(TEXT("-"));
+}
+
+float SNavGen3DWindow::GetMoverAccelerationValue() const
+{
+	if (UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
+	{
+		if (Subsystem->DebugMoverAcceleration.IsSet())
+			return Subsystem->DebugMoverAcceleration.GetValue();
+		if (ANavGen3DMover* Mover = GetFirstMover(Subsystem))
+			return Mover->SimAcceleration;
+	}
+	return 0.0f;
+}
+
+void SNavGen3DWindow::OnMoverAccelerationChanged(float InNewValue)
+{
+	if (UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
+	{
+		Subsystem->DebugMoverAcceleration = InNewValue;
+		ForEachMover(Subsystem, [InNewValue](ANavGen3DMover* M) { M->SimAcceleration = InNewValue; });
+	}
+}
+
+FText SNavGen3DWindow::GetMoverAccelerationText() const
+{
+	if (UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
+	{
+		if (Subsystem->DebugMoverAcceleration.IsSet())
+			return FText::FromString(FString::Printf(TEXT("%.0f"), Subsystem->DebugMoverAcceleration.GetValue()));
+		if (ANavGen3DMover* Mover = GetFirstMover(Subsystem))
+			return FText::FromString(FString::Printf(TEXT("%.0f"), Mover->SimAcceleration));
+	}
+	return FText::FromString(TEXT("-"));
+}
+
+float SNavGen3DWindow::GetMoverTurnRateValue() const
+{
+	if (UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
+		if (ANavGen3DMover* Mover = GetFirstMover(Subsystem))
+			return Mover->SimTurnRate;
+	return 0.0f;
+}
+
+void SNavGen3DWindow::OnMoverTurnRateChanged(float InNewValue)
+{
+	if (UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
+		ForEachMover(Subsystem, [InNewValue](ANavGen3DMover* M) { M->SimTurnRate = InNewValue; });
+}
+
+FText SNavGen3DWindow::GetMoverTurnRateText() const
+{
+	if (UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
+		if (ANavGen3DMover* Mover = GetFirstMover(Subsystem))
+			return FText::FromString(FString::Printf(TEXT("%.0f"), Mover->SimTurnRate));
+	return FText::FromString(TEXT("-"));
+}
+
+float SNavGen3DWindow::GetMoverPathingAngleValue() const
+{
+	if (UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
+		if (ANavGen3DMover* Mover = GetFirstMover(Subsystem))
+			return Mover->SimPathingAngle;
+	return 0.0f;
+}
+
+void SNavGen3DWindow::OnMoverPathingAngleChanged(float InNewValue)
+{
+	if (UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
+		ForEachMover(Subsystem, [InNewValue](ANavGen3DMover* M) { M->SimPathingAngle = InNewValue; });
+}
+
+FText SNavGen3DWindow::GetMoverPathingAngleText() const
+{
+	if (UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
+		if (ANavGen3DMover* Mover = GetFirstMover(Subsystem))
+			return FText::FromString(FString::Printf(TEXT("%.0f"), Mover->SimPathingAngle));
+	return FText::FromString(TEXT("-"));
+}
+
+float SNavGen3DWindow::GetMoverApproachDistanceValue() const
+{
+	if (UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
+		if (ANavGen3DMover* Mover = GetFirstMover(Subsystem))
+			return Mover->ApproachDistance;
+	return 0.0f;
+}
+
+void SNavGen3DWindow::OnMoverApproachDistanceChanged(float InNewValue)
+{
+	if (UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
+		ForEachMover(Subsystem, [InNewValue](ANavGen3DMover* M) { M->ApproachDistance = InNewValue; });
+}
+
+FText SNavGen3DWindow::GetMoverApproachDistanceText() const
+{
+	if (UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
+		if (ANavGen3DMover* Mover = GetFirstMover(Subsystem))
+			return FText::FromString(FString::Printf(TEXT("%.0f"), Mover->ApproachDistance));
+	return FText::FromString(TEXT("-"));
 }
 
 NavGen3D_ENABLE_OPTIMIZATION

@@ -17,6 +17,13 @@ ANavGen3DMover::ANavGen3DMover()
 void ANavGen3DMover::BeginPlay()
 {
 	Super::BeginPlay();
+	if (const UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
+	{
+		if (Subsystem->DebugMoverMaxVelocity.IsSet())
+			SimMaxVelocity = Subsystem->DebugMoverMaxVelocity.GetValue();
+		if (Subsystem->DebugMoverAcceleration.IsSet())
+			SimAcceleration = Subsystem->DebugMoverAcceleration.GetValue();
+	}
 }
 
 void ANavGen3DMover::Tick(float DeltaTime)
@@ -77,7 +84,9 @@ void ANavGen3DMover::UpdateApproachLocation()
 		}
 	}
 
-	const float DistToTarget = FVector::Distance(GetActorLocation(), TargetLocation);
+	const float DistToTarget  = FVector::Distance(GetActorLocation(), TargetLocation);
+	const float AgentRadius   = Subsystem->GetAgentCollisionRadius(AgentIndex, /*bPadded=*/false);
+	const FCollisionShape LOSSphere = FCollisionShape::MakeSphere(AgentRadius * 0.5f);
 
 	// Determine whether the current ApproachLocation is still valid.
 	// bTooFar checks the approach point's own distance to the target (not the mover's) so that a
@@ -89,7 +98,7 @@ void ANavGen3DMover::UpdateApproachLocation()
 		const float ApproachDistToTarget = FVector::Distance(ApproachLocation, TargetLocation);
 		const bool bTooFar   = ApproachDistToTarget > ApproachDistance * 1.2f;
 		const bool bTooClose = DistToTarget < ApproachDistance * 0.8f;
-		const bool bLOSLost  = World->LineTraceTestByChannel(ApproachLocation, TargetLocation, ECC_Visibility);
+		const bool bLOSLost  = World->SweepTestByChannel(ApproachLocation, TargetLocation, FQuat::Identity, ECC_Visibility, LOSSphere);
 		bNeedNewApproach = bTooFar || bTooClose || bLOSLost;
 	}
 
@@ -123,7 +132,6 @@ void ANavGen3DMover::UpdateApproachLocation()
 	const float DecelDist     = SimAcceleration > KINDA_SMALL_NUMBER
 	                            ? (CurrentSpeed * CurrentSpeed) / (2.0f * SimAcceleration)
 	                            : 0.0f;
-	const float AgentRadius   = Subsystem->GetAgentCollisionRadius(AgentIndex, /*bPadded=*/false);
 	const float LookaheadDist = FMath::Max(DecelDist, AgentRadius);
 
 	// Walk the path forward by LookaheadDist from the mover's position.
@@ -151,7 +159,7 @@ void ANavGen3DMover::UpdateApproachLocation()
 	// If the lookahead point has LOS to the target, commit to it as the approach.
 	// Either way, SimPathSearchSpace follows the path to TargetLocation — ApproachLocation is
 	// a stopping intercept along that path, not a separate navigation destination.
-	const bool bHasLOS = !World->LineTraceTestByChannel(LookaheadPoint, TargetLocation, ECC_Visibility);
+	const bool bHasLOS = !World->SweepTestByChannel(LookaheadPoint, TargetLocation, FQuat::Identity, ECC_Visibility, LOSSphere);
 	ApproachLocation   = bHasLOS ? LookaheadPoint : FVector(FLT_MAX);
 	SimPathSearchSpace = PathToTarget;
 
@@ -448,6 +456,12 @@ void ANavGen3DMover::UpdateSimLocation()
 		return;
 	}
 
+	if (bHasApproach && IsAtGoalLocation() && SimVelocity.IsNearlyZero())
+	{
+		SimVelocity = FVector::ZeroVector;
+		bSettled    = true;
+	}
+
 	UpdateSimRotation();
 
 	if (bSettled)
@@ -455,19 +469,16 @@ void ANavGen3DMover::UpdateSimLocation()
 		return;
 	}
 
-	if (bHasApproach && IsAtGoalLocation() && SimVelocity.IsNearlyZero())
+	// Gate on velocity direction — brake if headed away from the current path node.
+	// Using the path node (not ApproachLocation) so intermediate nodes along a curved path
+	// don't incorrectly trigger braking while the mover is still en route.
+	if (bHasValidPath && !SimVelocity.IsNearlyZero())
 	{
-		SimVelocity = FVector::ZeroVector;
-		bSettled    = true;
-		return;
-	}
-
-	// Gate on velocity direction only when an approach is set — brake if headed away from it.
-	if (bHasApproach && !SimVelocity.IsNearlyZero())
-	{
-		const FVector ToApproach = (ApproachLocation - GetActorLocation()).GetSafeNormal();
-		const float   CosAngle   = FMath::Cos(FMath::DegreesToRadians(SimPathingAngle));
-		if (FVector::DotProduct(SimVelocity.GetSafeNormal(), ToApproach) < CosAngle)
+		const TArray<FVector>& Path   = SimPathSearchSpace.PathSolution;
+		const int32            NodeIdx = FMath::Clamp(SimPathNodeIndex, 0, Path.Num() - 1);
+		const FVector ToNode  = (Path[NodeIdx] - GetActorLocation()).GetSafeNormal();
+		const float   CosAngle = FMath::Cos(FMath::DegreesToRadians(SimPathingAngle));
+		if (FVector::DotProduct(SimVelocity.GetSafeNormal(), ToNode) < CosAngle)
 		{
 			UWorld* World = GetWorld();
 			if (World)
@@ -597,13 +608,21 @@ void ANavGen3DMover::UpdateSimSteering()
 	const float   AgentRadius   = Subsystem->GetAgentCollisionRadius(AgentIndex, /*bPadded=*/false);
 	const float   TraceLength   = FMath::Max(AgentRadius, SimVelocity.Size() * DeltaTime * 3.0f);
 
-	// Base direction: SimVelocity projected to the XY plane, falling back to actor forward if negligible.
-	const FVector Velocity2D  = FVector(SimVelocity.X, SimVelocity.Y, 0.0f);
-	const FVector ActorFwd    = GetActorForwardVector();
-	const FVector ActorFwd2D  = FVector(ActorFwd.X, ActorFwd.Y, 0.0f);
-	const FVector ForwardDir  = !Velocity2D.IsNearlyZero() ? Velocity2D.GetSafeNormal()
-	                          : !ActorFwd2D.IsNearlyZero() ? ActorFwd2D.GetSafeNormal()
-	                          : FVector::ForwardVector;
+	// Base direction: actor forward vector, smoothly interpolated by UpdateSimRotation at SimTurnRate.
+	// Using SimVelocity caused feedback jitter (steering deflects velocity → changes forward dir →
+	// different probes → more deflection). Using the raw path-node direction oscillates because
+	// SimPathNodeIndex bounces between skip-ahead and fall-back every frame. The actor forward is
+	// the stable, low-pass result of both — unaffected by either feedback source.
+	const FVector ActorFwd   = GetActorForwardVector();
+	const FVector ActorFwd2D = FVector(ActorFwd.X, ActorFwd.Y, 0.0f);
+	const TArray<FVector>& SteerPath    = SimPathSearchSpace.PathSolution;
+	const int32            SteerNodeIdx = FMath::Clamp(SimPathNodeIndex, 0, SteerPath.Num() - 1);
+	const FVector NodeDir2D = SteerPath.IsEmpty() ? FVector::ZeroVector
+	                        : FVector(SteerPath[SteerNodeIdx].X - ActorLocation.X,
+	                                  SteerPath[SteerNodeIdx].Y - ActorLocation.Y, 0.0f);
+	const FVector ForwardDir = !ActorFwd2D.IsNearlyZero() ? ActorFwd2D.GetSafeNormal()
+	                         : !NodeDir2D.IsNearlyZero()   ? NodeDir2D.GetSafeNormal()
+	                         : FVector::ForwardVector;
 	const float   AngleRad   = FMath::DegreesToRadians(SimSteeringAngle);
 
 	// SimSteeringUp: starts above the actor, pitch ForwardDir upward by SimSteeringAngle.

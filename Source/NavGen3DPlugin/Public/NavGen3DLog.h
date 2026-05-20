@@ -4,6 +4,8 @@
 
 #include "CoreMinimal.h"
 
+DECLARE_LOG_CATEGORY_EXTERN(LogNavGen3D, Log, All);
+
 enum class ENavGen3DLogCategory : uint8
 {
 	Info,

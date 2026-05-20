@@ -6,7 +6,6 @@
 #include "NavGen3DLog.h"
 #include "NavGen3DSubsystem.h"
 #include "Widgets/SCompoundWidget.h"
-#include "Widgets/Views/SListView.h"
 
 class SNavGen3DWindow : public SCompoundWidget
 {
@@ -72,26 +71,32 @@ private:
 	FText GetDebugDrawTimeText() const;
 	void OnDebugDrawTimeChanged(float InNewValue);
 
+	// Mover 3D Settings panel
+	float GetMoverAgentIndexValue() const;
+	void OnMoverAgentIndexChanged(float InNewValue);
+	FText GetMoverAgentIndexText() const;
+	float GetMoverMaxVelocityValue() const;
+	void OnMoverMaxVelocityChanged(float InNewValue);
+	FText GetMoverMaxVelocityText() const;
+	float GetMoverAccelerationValue() const;
+	void OnMoverAccelerationChanged(float InNewValue);
+	FText GetMoverAccelerationText() const;
+	float GetMoverTurnRateValue() const;
+	void OnMoverTurnRateChanged(float InNewValue);
+	FText GetMoverTurnRateText() const;
+	float GetMoverPathingAngleValue() const;
+	void OnMoverPathingAngleChanged(float InNewValue);
+	FText GetMoverPathingAngleText() const;
+	float GetMoverApproachDistanceValue() const;
+	void OnMoverApproachDistanceChanged(float InNewValue);
+	FText GetMoverApproachDistanceText() const;
+
 	// Stats panel
 	FText GetBoundsVolumeCountText() const;
 	FText GetUnprocessedVolumeCountText() const;
 	FText GetSolutionVolumeCountText() const;
 
-	// Right panel
-	FReply OnToggleLogPanelClicked();
-	EVisibility GetLogPanelVisibility() const;
-	FText GetToggleLogButtonText() const;
 	FReply OnClearDebugClicked();
-	FReply OnClearLogClicked();
-	void OnSearchTextChanged(const FText& InText);
-	void RefreshFilteredLog();
-	TSharedRef<ITableRow> GenerateLogRow(TSharedPtr<FNavGen3DLogEntry> InItem, const TSharedRef<STableViewBase>& InOwnerTable);
 
-	bool bLogPanelVisible = true;
 	FString VolumeIDText;
-	float CachedExpandedWindowWidth = 620.0f;
-	TArray<TSharedPtr<FNavGen3DLogEntry>> LogEntries;
-	TArray<TSharedPtr<FNavGen3DLogEntry>> FilteredLogEntries;
-	TSharedPtr<SListView<TSharedPtr<FNavGen3DLogEntry>>> LogListView;
-	FString SearchText;
 };

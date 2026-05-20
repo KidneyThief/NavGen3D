@@ -163,6 +163,9 @@ public:
 	UPROPERTY()
 	int32 DebugNavMeshAgentIndex = 0;
 
+	TOptional<float> DebugMoverMaxVelocity;
+	TOptional<float> DebugMoverAcceleration;
+
 	UPROPERTY()
 	float Epsilon = 0.1f;
 

@@ -10,6 +10,9 @@
 #include "WorkspaceMenuStructure.h"
 #include "WorkspaceMenuStructureModule.h"
 #include "NavGen3DSettings.h"
+#include "NavGen3DLog.h"
+
+DEFINE_LOG_CATEGORY(LogNavGen3D);
 
 // -- defined in NavGen3DSettings.h
 NavGen3D_DISABLE_OPTIMIZATION
@@ -59,7 +62,7 @@ TSharedRef<SDockTab> FNavGen3DPluginModule::SpawnNavGen3DTab(const FSpawnTabArgs
 			if (TSharedPtr<SWindow> TabWindow = InTab->GetParentWindow())
 			{
 				TabWindow->SetSizeLimits(FWindowSizeLimits()
-					.SetMinWidth(620.0f)
+					.SetMinWidth(300.0f)
 					.SetMinHeight(520.0f));
 			}
 		}
