@@ -339,7 +339,7 @@ void ANavGen3DMover::MoveWithSweep(const FVector& NewLocation)
 
 	if (bBlocked && Hit.bStartPenetrating)
 	{
-		SimSteeringInfluence = FMath::Min(SimSteeringInfluence + SteeringFactor, 2.0f);
+		SimSteeringInfluence = FMath::Min(SimSteeringInfluence + SteeringFactor, 2.0f); // kept for debug viz only
 		// Push out via the MTD normal when available; otherwise move toward the intended
 		// destination so the actor doesn't freeze indefinitely inside geometry.
 		const FVector EscapeLocation = Hit.Normal.IsNearlyZero()
@@ -360,7 +360,7 @@ void ANavGen3DMover::MoveWithSweep(const FVector& NewLocation)
 			SimVelocity += (-VelIntoSurface) * Hit.Normal;
 		}
 
-		SimSteeringInfluence = FMath::Min(SimSteeringInfluence + SteeringFactor, 2.0f);
+		SimSteeringInfluence = FMath::Min(SimSteeringInfluence + SteeringFactor, 2.0f); // kept for debug viz only
 		SimBlockedSteering   = (SimBlockedSteering + Hit.Normal * SteeringFactor).GetClampedToMaxSize(1.0f);
 	}
 }
@@ -413,18 +413,14 @@ bool ANavGen3DMover::UpdateSimPathFollowing()
 		return true;
 	}
 
-	// Build a path direction: toward the node, corrected for any velocity that is
-	// perpendicular or away from the node (forward-toward velocity is left uncontested).
-	FVector NodeAccelDir = ToNode;
-	if (!SimVelocity.IsNearlyZero())
-	{
-		const float ForwardSpeed      = FVector::DotProduct(SimVelocity, ToNode);
-		const FVector TowardComponent = FMath::Max(0.0f, ForwardSpeed) * ToNode;
-		NodeAccelDir                  = ToNode - (SimVelocity - TowardComponent);
-	}
-
+	// Steer directly toward the node with obstacle avoidance blended in.
+	// The velocity-correction formula (ToNode - lateral_velocity) caused jitter:
+	// wall bounces created large lateral velocity, making NodeAccelDir oscillate
+	// each frame in the opposite direction of the last impact normal.
+	// When opposing probe directions cancel, EffectiveSteering → 0, so the mover
+	// accelerates at full rate toward the node with no steering tax.
 	const FVector EffectiveSteering  = (SimSteeringResult + SimBlockedSteering).GetClampedToMaxSize(1.0f);
-	const FVector AccelerationVector = (NodeAccelDir.GetSafeNormal() + EffectiveSteering * SimSteeringInfluence).GetSafeNormal() * SimAcceleration * DeltaTime;
+	const FVector AccelerationVector = (ToNode + EffectiveSteering * 2.0f).GetSafeNormal() * SimAcceleration * DeltaTime;
 	SimVelocity = (SimVelocity + AccelerationVector).GetClampedToMaxSize(SimMaxVelocity);
 	MoveWithSweep(GetActorLocation() + SimVelocity * DeltaTime);
 
@@ -653,7 +649,9 @@ void ANavGen3DMover::UpdateSimSteering()
 	SimSteeringDown     *= (1.0f - SteeringFactor);
 	SimSteeringLeft     *= (1.0f - SteeringFactor);
 	SimSteeringRight    *= (1.0f - SteeringFactor);
-	SimBlockedSteering  *= (1.0f - SteeringFactor);
+	// SimBlockedSteering decays 4× faster than probe steering — wall-bounce normals from
+	// MoveWithSweep should clear quickly so opposing impact normals don't linger and oscillate.
+	SimBlockedSteering  *= (1.0f - FMath::Min(DeltaTime / FMath::Max(SimSteeringTime * 0.25f, 0.05f), 1.0f));
 	// Decay influence back toward base (0.5); excess above base decays at the same rate.
 	SimSteeringInfluence = 0.5f + (SimSteeringInfluence - 0.5f) * (1.0f - SteeringFactor);
 
