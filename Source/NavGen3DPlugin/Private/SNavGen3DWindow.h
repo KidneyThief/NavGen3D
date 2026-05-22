@@ -73,6 +73,8 @@ private:
 
 	// Mover 3D Debug panel
 	FReply OnMoverResetClicked();
+	ECheckBoxState GetMoverDrawAsArrowState() const;
+	void OnMoverDrawAsArrowChanged(ECheckBoxState InNewState);
 	float GetMoverAgentIndexValue() const;
 	void OnMoverAgentIndexChanged(float InNewValue);
 	FText GetMoverAgentIndexText() const;

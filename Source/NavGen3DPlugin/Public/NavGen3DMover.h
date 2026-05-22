@@ -45,6 +45,8 @@ public:
 
 	void SimReset(bool bResetPhysics = false);
 
+	inline static bool bDebugDrawAsArrow = true;
+
 private:
 	void MoveWithSweep(const FVector& NewLocation);
 	void DebugDrawMover();
@@ -54,7 +56,7 @@ private:
 	void UpdateSimLocation();
 	void UpdateSimRotation();
 	void UpdateSimSteering();
-	bool IsAtGoalLocation() const;
+	bool IsAtGoalLocation(bool& OutHasLOS) const;
 	bool UpdateSimPathFollowing();
 	void UpdateSimPathNode();
 	bool SimPathLookAheadLocation(const FVector& InCurrentLocation, float InDistance, FVector& OutPathLocation) const;

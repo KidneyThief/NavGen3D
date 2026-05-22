@@ -459,6 +459,15 @@ void SNavGen3DWindow::Construct(const FArguments& InArgs)
 						[
 							SNew(SHorizontalBox)
 							+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+							[ SNew(STextBlock).Text(FText::FromString("Draw As Arrow:  ")).ColorAndOpacity(TextColor) ]
+							+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+							[ SNew(SCheckBox).IsChecked(this, &SNavGen3DWindow::GetMoverDrawAsArrowState).OnCheckStateChanged(this, &SNavGen3DWindow::OnMoverDrawAsArrowChanged) ]
+						]
+
+						+ SVerticalBox::Slot().AutoHeight().Padding(8.0f, 4.0f, 8.0f, 4.0f)
+						[
+							SNew(SHorizontalBox)
+							+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
 							[ SNew(STextBlock).Text(FText::FromString("Agent Index:  ")).ColorAndOpacity(TextColor) ]
 							+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
 							[
@@ -1240,6 +1249,16 @@ FReply SNavGen3DWindow::OnMoverResetClicked()
 		});
 	}
 	return FReply::Handled();
+}
+
+ECheckBoxState SNavGen3DWindow::GetMoverDrawAsArrowState() const
+{
+	return ANavGen3DMover::bDebugDrawAsArrow ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+}
+
+void SNavGen3DWindow::OnMoverDrawAsArrowChanged(ECheckBoxState InNewState)
+{
+	ANavGen3DMover::bDebugDrawAsArrow = (InNewState == ECheckBoxState::Checked);
 }
 
 float SNavGen3DWindow::GetMoverAgentIndexValue() const

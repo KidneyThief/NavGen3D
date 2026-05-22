@@ -78,7 +78,7 @@ void ANavGen3DMover::UpdateApproachLocation()
 		const FVector TraceEnd   = TargetLocation - FVector(0.0f, 0.0f, LiftRadius * 20.0f);
 		if (World->LineTraceSingleByChannel(Hit, TraceStart, TraceEnd, ECC_WorldStatic))
 		{
-			const float MinZ = Hit.ImpactPoint.Z + LiftRadius * 2.0f;
+			const float MinZ = Hit.ImpactPoint.Z + LiftRadius;
 			if (TargetLocation.Z < MinZ)
 			{
 				TargetLocation.Z = MinZ;
@@ -183,8 +183,10 @@ void ANavGen3DMover::UpdateApproachLocation()
 	}
 }
 
-bool ANavGen3DMover::IsAtGoalLocation() const
+bool ANavGen3DMover::IsAtGoalLocation(bool& OutHasLOS) const
 {
+	OutHasLOS = false;
+
 	const UNavGen3DSubsystem* Subsystem = GEngine ? GEngine->GetEngineSubsystem<UNavGen3DSubsystem>() : nullptr;
 	if (!Subsystem)
 	{
@@ -195,6 +197,33 @@ bool ANavGen3DMover::IsAtGoalLocation() const
 	if (!World)
 	{
 		return false;
+	}
+
+	// OutHasLOS: mover is facing within SimPathingAngle of the target and has clear LOS to it.
+	FVector TargetLocation = FVector(FLT_MAX);
+	if (APlayerController* PC = World->GetFirstPlayerController())
+	{
+		if (APawn* Pawn = PC->GetPawn())
+		{
+			TargetLocation = Pawn->GetActorLocation();
+		}
+	}
+	if (TargetLocation.X >= FLT_MAX)
+	{
+		TargetLocation = Subsystem->GetCameraLocation(AgentIndex);
+	}
+	if (TargetLocation.X < FLT_MAX)
+	{
+		const FVector ToTarget  = TargetLocation - GetActorLocation();
+		const float   TargetDist = ToTarget.Size();
+		if (TargetDist > KINDA_SMALL_NUMBER)
+		{
+			const float AngleToTarget = FMath::RadiansToDegrees(
+				FMath::Acos(FMath::Clamp(FVector::DotProduct(GetActorForwardVector(), ToTarget / TargetDist), -1.0f, 1.0f)));
+			const bool bInAngle = AngleToTarget < SimPathingAngle;
+			const bool bLOS     = !World->LineTraceTestByChannel(GetActorLocation(), TargetLocation, ECC_Visibility);
+			OutHasLOS = bInAngle && bLOS;
+		}
 	}
 
 	if (ApproachLocation.X >= FLT_MAX)
@@ -542,7 +571,8 @@ void ANavGen3DMover::UpdateSimLocation()
 		return;
 	}
 
-	if (bHasApproach && IsAtGoalLocation() && SimVelocity.IsNearlyZero())
+	bool bGoalLOS = false;
+	if (bHasApproach && IsAtGoalLocation(bGoalLOS) && SimVelocity.IsNearlyZero())
 	{
 		SimVelocity = FVector::ZeroVector;
 		bSettled    = true;
@@ -840,25 +870,60 @@ void ANavGen3DMover::DebugDrawMover()
 		return;
 	}
 
-	const float Radius      = Subsystem->GetAgentCollisionRadius(AgentIndex, /*bPadded=*/false);
-	const float ArrowLength = Radius * 2.0f;
-	const float Thickness   = 1.0f;
-	const FVector Forward   = GetActorForwardVector();
-	const FVector Center    = GetActorLocation();
-	const FVector Start     = Center - Forward * Radius;
-	const FVector End       = Center + Forward * Radius;
-	const FColor  DrawColor = IsAtGoalLocation() ? FColor::Green : FColor::Orange;
+	const float   Radius  = Subsystem->GetAgentCollisionRadius(AgentIndex, /*bPadded=*/false);
+	const FVector Center  = GetActorLocation();
+	bool bHasLOS = false;
+	IsAtGoalLocation(bHasLOS);
+	const FColor DrawColor = bHasLOS ? FColor::Green : FColor::Orange;
 
-	// Shaft: 70% of length, thin cylinder
-	const float ShaftLength  = ArrowLength * 0.7f;
-	const FVector ShaftEnd   = Start + Forward * ShaftLength;
-	const float ShaftRadius  = ArrowLength * 0.05f;
-	DrawDebugCylinder(World, Start, ShaftEnd, ShaftRadius, 8, DrawColor, /*bPersistentLines=*/false, /*LifeTime=*/-1.0f, /*DepthPriority=*/0, Thickness);
+	if (bDebugDrawAsArrow)
+	{
+		const float   ArrowLength = Radius * 2.0f;
+		const float   Thickness   = 1.0f;
+		const FVector Forward     = GetActorForwardVector();
+		const FVector Start       = Center - Forward * Radius;
+		const FVector End         = Center + Forward * Radius;
 
-	// Head: cone with apex at tip, opening backward over the remaining 30%
-	const float HeadLength    = ArrowLength * 0.3f;
-	const float HeadHalfAngle = FMath::Atan2(ArrowLength * 0.15f, HeadLength);
-	DrawDebugCone(World, End, -Forward, HeadLength, HeadHalfAngle, HeadHalfAngle, 8, DrawColor, /*bPersistentLines=*/false, /*LifeTime=*/-1.0f, /*DepthPriority=*/0, Thickness);
+		const float   ShaftLength = ArrowLength * 0.7f;
+		const FVector ShaftEnd    = Start + Forward * ShaftLength;
+		DrawDebugCylinder(World, Start, ShaftEnd, ArrowLength * 0.05f, 8, DrawColor, false, -1.0f, 0, Thickness);
+
+		const float HeadHalfAngle = FMath::Atan2(ArrowLength * 0.15f, ArrowLength * 0.3f);
+		DrawDebugCone(World, End, -Forward, ArrowLength * 0.3f, HeadHalfAngle, HeadHalfAngle, 8, DrawColor, false, -1.0f, 0, Thickness);
+	}
+	else
+	{
+		// Saucer: thin torus rim + larger central dome sphere
+		const float MajorRadius  = Radius;
+		const float MinorRadius  = Radius * 0.15f;  // thin rim
+		const float SphereRadius = Radius * 0.7f;
+		const FColor SaucerColor = bHasLOS ? FColor(220, 180, 255) : FColor(180, 120, 220);
+		const FColor RimColor    = SaucerColor;
+		const FColor DomeColor   = SaucerColor;
+		const int32  NumSegments = 16;
+		const float  Step        = TWO_PI / NumSegments;
+
+		auto TorusPoint = [&](float U, float V) -> FVector
+		{
+			return Center + FVector(
+				(MajorRadius + MinorRadius * FMath::Cos(V)) * FMath::Cos(U),
+				(MajorRadius + MinorRadius * FMath::Cos(V)) * FMath::Sin(U),
+				MinorRadius * FMath::Sin(V));
+		};
+
+		for (int32 i = 0; i < NumSegments; ++i)
+		{
+			const float U0 = i * Step, U1 = (i + 1) * Step;
+			for (int32 j = 0; j < NumSegments; ++j)
+			{
+				const float V0 = j * Step, V1 = (j + 1) * Step;
+				DrawDebugLine(World, TorusPoint(U0, V0), TorusPoint(U1, V0), RimColor, false, -1.0f);
+				DrawDebugLine(World, TorusPoint(U0, V0), TorusPoint(U0, V1), RimColor, false, -1.0f);
+			}
+		}
+
+		DrawDebugSphere(World, Center, SphereRadius, 8, DomeColor, false, -1.0f);
+	}
 
 	SimDrawPath();
 	SimDrawSteering();
