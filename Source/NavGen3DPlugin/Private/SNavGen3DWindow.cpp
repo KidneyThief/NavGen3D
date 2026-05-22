@@ -432,7 +432,7 @@ void SNavGen3DWindow::Construct(const FArguments& InArgs)
 					]
 				]
 
-				// ---- Mover 3D Settings ----
+				// ---- Mover 3D Debug ----
 				+ SVerticalBox::Slot()
 				.AutoHeight()
 				[
@@ -441,12 +441,19 @@ void SNavGen3DWindow::Construct(const FArguments& InArgs)
 					.HeaderContent()
 					[
 						SNew(STextBlock)
-						.Text(FText::FromString("Mover 3D Settings"))
+						.Text(FText::FromString("Mover 3D Debug"))
 						.ColorAndOpacity(LabelColor)
 					]
 					.BodyContent()
 					[
 						SNew(SVerticalBox)
+
+						+ SVerticalBox::Slot().AutoHeight().Padding(8.0f, 4.0f, 8.0f, 4.0f)
+						[
+							SNew(SButton)
+							.Text(FText::FromString("Reset"))
+							.OnClicked(this, &SNavGen3DWindow::OnMoverResetClicked)
+						]
 
 						+ SVerticalBox::Slot().AutoHeight().Padding(8.0f, 4.0f, 8.0f, 4.0f)
 						[
@@ -1218,6 +1225,19 @@ FReply SNavGen3DWindow::OnValidateNavMesh3DClicked()
 	if (UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
 	{
 		Subsystem->ValidateNavMesh3D();
+	}
+	return FReply::Handled();
+}
+
+FReply SNavGen3DWindow::OnMoverResetClicked()
+{
+	if (UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
+	{
+		ForEachMover(Subsystem, [](ANavGen3DMover* M)
+		{
+			M->ApproachLocation = FVector(FLT_MAX);
+			M->SimReset(/*bResetPhysics=*/true);
+		});
 	}
 	return FReply::Handled();
 }

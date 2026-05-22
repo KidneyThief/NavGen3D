@@ -71,7 +71,8 @@ private:
 	FText GetDebugDrawTimeText() const;
 	void OnDebugDrawTimeChanged(float InNewValue);
 
-	// Mover 3D Settings panel
+	// Mover 3D Debug panel
+	FReply OnMoverResetClicked();
 	float GetMoverAgentIndexValue() const;
 	void OnMoverAgentIndexChanged(float InNewValue);
 	FText GetMoverAgentIndexText() const;
