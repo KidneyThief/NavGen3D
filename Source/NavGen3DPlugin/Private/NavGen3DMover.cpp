@@ -436,8 +436,28 @@ bool ANavGen3DMover::UpdateSimPathFollowing()
 
 	if (bDecelerating)
 	{
-		const float NewSpeed = FMath::Max(0.0f, CurrentSpeed - SimAcceleration * DeltaTime);
-		SimVelocity = NewSpeed > KINDA_SMALL_NUMBER ? SimVelocity.GetSafeNormal() * NewSpeed : FVector::ZeroVector;
+		const FVector ToApproach     = ApproachLocation - GetActorLocation();
+		const float   DistToApproach = ToApproach.Size();
+		const FVector ApproachDir    = DistToApproach > KINDA_SMALL_NUMBER
+		                             ? ToApproach / DistToApproach
+		                             : (SimVelocity.IsNearlyZero() ? FVector::ZeroVector : SimVelocity.GetSafeNormal());
+
+		// Speed profile: sqrt(2*a*d) is the ideal speed at this distance — it is exactly the speed
+		// from which braking at SimAcceleration reaches zero at ApproachLocation.
+		// If below profile speed (e.g. slowed by geometry), re-accelerate back onto the curve so
+		// the mover never stalls short of the approach. If above, brake as normal.
+		const float IdealSpeed = FMath::Sqrt(2.0f * SimAcceleration * DistToApproach);
+		float NewSpeed;
+		if (CurrentSpeed < IdealSpeed)
+		{
+			NewSpeed = FMath::Min(CurrentSpeed + SimAcceleration * DeltaTime, IdealSpeed);
+		}
+		else
+		{
+			NewSpeed = FMath::Max(0.0f, CurrentSpeed - SimAcceleration * DeltaTime);
+		}
+
+		SimVelocity = NewSpeed > KINDA_SMALL_NUMBER ? ApproachDir * NewSpeed : FVector::ZeroVector;
 		MoveWithSweep(GetActorLocation() + SimVelocity * DeltaTime);
 		return true;
 	}
