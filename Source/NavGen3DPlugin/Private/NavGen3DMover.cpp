@@ -88,6 +88,7 @@ void ANavGen3DMover::UpdateApproachLocation()
 
 	const float DistToTarget  = FVector::Distance(GetActorLocation(), TargetLocation);
 	const float AgentRadius   = Subsystem->GetAgentCollisionRadius(AgentIndex, /*bPadded=*/false);
+
 	const FCollisionShape LOSSphere = FCollisionShape::MakeSphere(AgentRadius * 0.5f);
 
 	// When far from the target, navigate directly without trying to find an approach intercept.
@@ -462,15 +463,14 @@ bool ANavGen3DMover::UpdateSimPathFollowing()
 		return true;
 	}
 
-	// Steer directly toward the node with obstacle avoidance blended in.
-	// The velocity-correction formula (ToNode - lateral_velocity) caused jitter:
-	// wall bounces created large lateral velocity, making NodeAccelDir oscillate
-	// each frame in the opposite direction of the last impact normal.
-	// When opposing probe directions cancel, EffectiveSteering → 0, so the mover
-	// accelerates at full rate toward the node with no steering tax.
-	const FVector EffectiveSteering  = (SimSteeringResult + SimBlockedSteering).GetClampedToMaxSize(1.0f);
-	const FVector AccelerationVector = (ToNode + EffectiveSteering * 2.0f).GetSafeNormal() * SimAcceleration * DeltaTime;
-	SimVelocity = (SimVelocity + AccelerationVector).GetClampedToMaxSize(SimMaxVelocity);
+	// Seek: compute desired velocity toward the node, then apply the delta from current velocity
+	// clamped to SimAcceleration * DeltaTime. This naturally counteracts lateral and opposing
+	// momentum — the mover brakes into turns rather than overshooting at full speed.
+	const FVector EffectiveSteering = (SimSteeringResult + SimBlockedSteering).GetClampedToMaxSize(1.0f);
+	const FVector DesiredDir        = (ToNode + EffectiveSteering * 2.0f).GetSafeNormal();
+	const FVector DesiredVelocity   = DesiredDir * SimMaxVelocity;
+	const FVector SeekForce         = (DesiredVelocity - SimVelocity).GetClampedToMaxSize(SimAcceleration * DeltaTime);
+	SimVelocity = (SimVelocity + SeekForce).GetClampedToMaxSize(SimMaxVelocity);
 	MoveWithSweep(GetActorLocation() + SimVelocity * DeltaTime);
 
 	return true;
