@@ -37,7 +37,6 @@ struct FPathSearchNode
 	uint64 VolumeID = 0;
 	float DistFromSource = 0.0f;
 	float EstDistToTarget = 0.0f;
-	FPathSearchNode* PrevSearchSpace = nullptr;
 };
 
 struct FPathSearchSpace
@@ -117,6 +116,8 @@ public:
 	NavMeshVolume* FindClosestVolumeContainingLocation(int32 InAgentIndex, const FVector& InLocation, int32 InConnectivityID = 0, bool bPaddedRadius = true);
 	bool PathFind(FPathSearchSpace& InSearchSpace);
 	void FindPathPostProcess(FPathSearchSpace& InSearchSpace);
+	bool RegisterPathSearchSpace(const TSharedPtr<FPathSearchSpace>& InSearchSpace);
+	void ProcessPathSearchList();
 	void DebugFindPath(FVector InOrigin = InvalidLocation, FVector InDestination = InvalidLocation);
 	bool DebugValidatePath(const FPathSearchSpace& InSearchSpace);
 	TOptional<NavMeshVolume> FindGenerationVolumeContainingLocation(const FVector& InLocation, bool InRemoveFromProcessing);
@@ -190,6 +191,8 @@ private:
 #endif
 
 private:
+	void DebugDrawUpdate();
+
 	struct FDebugProcessUndoState
 	{
 		NavMeshVolume ProcessedVolume;
@@ -214,4 +217,5 @@ private:
 	TMap<uint64, uint64> NavMeshVolumeMap_Y;
 	TMap<uint64, uint64> NavMeshVolumeMap_Z;
 	TMap<int32, TMap<uint64, TArray<FNavVolumeConnection>>> NavVolumeConnectionMap;
+	TArray<TSharedPtr<FPathSearchSpace>> PathSearchList;
 };

@@ -1136,7 +1136,7 @@ NavMeshVolume* UNavGen3DSubsystem::FindClosestVolumeContainingLocation(int32 InA
 
 bool UNavGen3DSubsystem::PathFind(FPathSearchSpace& InSearchSpace)
 {
-	if (InSearchSpace.Status != EPathSearchStatus::Initialized)
+	if (InSearchSpace.Status != EPathSearchStatus::InProgress)
 	{
 		return false;
 	}
@@ -1273,6 +1273,78 @@ bool UNavGen3DSubsystem::PathFind(FPathSearchSpace& InSearchSpace)
 
 	InSearchSpace.Status = EPathSearchStatus::Fail;
 	return false;
+}
+
+bool UNavGen3DSubsystem::RegisterPathSearchSpace(const TSharedPtr<FPathSearchSpace>& InSearchSpace)
+{
+	if (!ensureAlways(IsInGameThread()))
+	{
+		return false;
+	}
+
+	if (!InSearchSpace.IsValid())
+	{
+		return false;
+	}
+
+	if (InSearchSpace->Status != EPathSearchStatus::Initialized)
+	{
+		return false;
+	}
+
+	// Reject duplicates — compare by pointer identity.
+	for (const TSharedPtr<FPathSearchSpace>& Existing : PathSearchList)
+	{
+		if (Existing == InSearchSpace)
+		{
+			return false;
+		}
+	}
+
+	InSearchSpace->Status = EPathSearchStatus::InProgress;
+	PathSearchList.Add(InSearchSpace);
+	return true;
+}
+
+void UNavGen3DSubsystem::ProcessPathSearchList()
+{
+	// Collect InProgress entries into a local array; drop everything else from the member list.
+	TArray<TSharedPtr<FPathSearchSpace>> LocalList;
+	for (int32 i = PathSearchList.Num() - 1; i >= 0; --i)
+	{
+		const TSharedPtr<FPathSearchSpace>& Entry = PathSearchList[i];
+		if (Entry.IsValid() && Entry->Status == EPathSearchStatus::InProgress)
+		{
+			LocalList.Add(Entry);
+		}
+		else
+		{
+			PathSearchList.RemoveAtSwap(i);
+		}
+	}
+
+	if (LocalList.IsEmpty())
+	{
+		return;
+	}
+
+	// Run PathFind for each search space in parallel on the thread pool.
+	// PathFind only reads the shared navmesh data; each FPathSearchSpace is written
+	// exclusively by its own thread, so no locking is needed.
+	ParallelFor(LocalList.Num(), [this, &LocalList](int32 Index)
+	{
+		PathFind(*LocalList[Index]);
+	});
+
+	// Remove entries whose status is no longer InProgress after the parallel pass.
+	for (int32 i = PathSearchList.Num() - 1; i >= 0; --i)
+	{
+		const TSharedPtr<FPathSearchSpace>& Entry = PathSearchList[i];
+		if (!Entry.IsValid() || Entry->Status != EPathSearchStatus::InProgress)
+		{
+			PathSearchList.RemoveAtSwap(i);
+		}
+	}
 }
 
 void UNavGen3DSubsystem::FindPathPostProcess(FPathSearchSpace& InSearchSpace)
@@ -2156,6 +2228,12 @@ TArray<ANavGen3DBoundsVolume*> UNavGen3DSubsystem::GetBoundsVolumes()
 }
 
 void UNavGen3DSubsystem::OnEndFrame()
+{
+	DebugDrawUpdate();
+	ProcessPathSearchList();
+}
+
+void UNavGen3DSubsystem::DebugDrawUpdate()
 {
 	UWorld* World = FindWorld();
 	const float DrawTime = World ? World->GetDeltaSeconds() * 1.1f : 0.0f;

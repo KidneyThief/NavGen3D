@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "NavGen3DBoundsVolume.h"
+#include "Components/BrushComponent.h"
 #include "NavGen3DBoundsVolumeAsset.h"
 #include "NavGen3DSubsystem.h"
 #include "NavGen3DSettings.h"
@@ -18,6 +19,11 @@ NavGen3D_DISABLE_OPTIMIZATION
 ANavGen3DBoundsVolume::ANavGen3DBoundsVolume(const FObjectInitializer& InObjectInitializer)
 	: Super(InObjectInitializer)
 {
+	if (UBrushComponent* BrushComp = GetBrushComponent())
+	{
+		BrushComp->SetGenerateOverlapEvents(false);
+	}
+
 	if (!HasAnyFlags(RF_ClassDefaultObject) && GEngine)
 	{
 		if (UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
