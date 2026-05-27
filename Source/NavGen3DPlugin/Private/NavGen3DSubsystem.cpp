@@ -1541,9 +1541,16 @@ void FPathSearchSpace::Reset()
 
 void FPathSearchSpace::Initialize(UNavGen3DSubsystem* InSubsystem, int32 InAgentIndex, const FVector& PathOrigin, const FVector& PathDestination)
 {
-	AgentIndex = InAgentIndex;
-	Origin = PathOrigin;
-	Destination = PathDestination;
+	AgentIndex       = InAgentIndex;
+	Origin           = PathOrigin;
+	Destination      = PathDestination;
+	OriginID         = 0;
+	DestinationID    = 0;
+	PathSolution.Reset();
+	PathVolumeIDs.Reset();
+	PathConnectionAxes.Reset();
+	bIsIntermediate.Reset();
+	NodeHeap.Reset();
 
 	if (InSubsystem)
 	{

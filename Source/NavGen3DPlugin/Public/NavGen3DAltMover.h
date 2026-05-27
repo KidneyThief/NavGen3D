@@ -39,18 +39,34 @@ public:
 	float SimPathingAngle = 60.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NavGen3D")
-	float ApproachDistance = 1000.0f;
+	float ApproachDistMin = 0.0f;
 
-	void SimReset();
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NavGen3D")
+	float ApproachDistMax = 1000.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "NavGen3D")
+	float SimBrakingMultiplier = 3.0f;
+
+	void SimReset(bool bResetPhysics);
 
 	inline static bool bDebugDrawAsArrow = true;
 
 private:
 	void MoveWithSweep(const FVector& NewLocation);
 	void DebugDraw();
-	void UpdateMovement(float DeltaTime);
+	void SimUpdateMovement(float DeltaTime);
+	void UpdateSimPathFollowing(float DeltaTime);
+	void UpdateSimApproachTarget(float DeltaTime);
+	void UpdateSimPathNode();
+	bool IsApproachingTarget();
 	FVector GetTargetLocation() const;
 
 	TSharedPtr<FPathSearchSpace> SimPathSearchSpace;
-	bool bSettled = false;
+	int32   SimPathIndex              = 0;
+	FVector SimPathVector             = FVector::ZeroVector;
+	FVector SimApproachVector         = FVector::ZeroVector;
+	FVector SimApproachTargetLocation = FVector(FLT_MAX);
+	float   SimApproachTimer          = 0.0f;
+	bool    bIsApproachingTarget      = false;
+	bool    bSettled                  = false;
 };
