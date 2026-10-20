@@ -77,6 +77,7 @@ public:
 	bool GenerateNavMesh3D(NavMeshVolume* InVolume = nullptr);
 	bool PlaneTrace(FVector InMin, FVector InMax, EAxis::Type InAxis, FVector& OutImpactPoint, bool& OutStartPenetrating);
 	bool ValidateConnectionCollision(const FCollisionShape& InSphere, const FVector& InStart, const FVector& InEnd);
+	bool SweepAgentLOS(int32 InAgentIndex, const FVector& InFrom, const FVector& InTo, AActor* InIgnoreActor = nullptr) const;
 	bool AddNavMeshVolume(NavMeshVolume& RefVolume);
 	void RemoveNavMeshVolume(uint64 InID);
 	bool ProcessNavMeshVolume(NavMeshVolume& RefVolume, bool InDrawDebug = false);
@@ -141,7 +142,7 @@ public:
 	bool DrawConnectivity = false;
 
 	UPROPERTY()
-	bool PathSmoothingEnabled = false;
+	bool PathSmoothingEnabled = true;
 
 	UPROPERTY()
 	bool DebugRepathContinuous = false;

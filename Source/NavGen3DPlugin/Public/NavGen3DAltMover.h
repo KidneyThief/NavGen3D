@@ -57,16 +57,18 @@ private:
 	void SimUpdateMovement(float DeltaTime);
 	void UpdateSimPathFollowing(float DeltaTime);
 	void UpdateSimApproachTarget(float DeltaTime);
+	void UpdateSimRotation(float DeltaTime);
 	void UpdateSimPathNode();
 	bool IsApproachingTarget();
 	FVector GetTargetLocation() const;
+	static bool PathLookAhead(const TArray<FVector>& InPath, const FVector& InLocation, float InDistance, FVector& OutLocation);
 
 	TSharedPtr<FPathSearchSpace> SimPathSearchSpace;
 	int32   SimPathIndex              = 0;
+	FVector SimLookaheadLocation      = FVector(FLT_MAX);
 	FVector SimPathVector             = FVector::ZeroVector;
 	FVector SimApproachVector         = FVector::ZeroVector;
 	FVector SimApproachTargetLocation = FVector(FLT_MAX);
 	float   SimApproachTimer          = 0.0f;
 	bool    bIsApproachingTarget      = false;
-	bool    bSettled                  = false;
 };

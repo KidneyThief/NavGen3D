@@ -1805,6 +1805,56 @@ bool UNavGen3DSubsystem::ValidateConnectionCollision(const FCollisionShape& InSp
 	return !bHit;
 }
 
+bool UNavGen3DSubsystem::SweepAgentLOS(int32 InAgentIndex, const FVector& InFrom, const FVector& InTo, AActor* InIgnoreActor) const
+{
+	UWorld* World = FindWorld();
+	if (!World)
+	{
+		return false;
+	}
+
+	const float AgentRadius = GetAgentCollisionRadius(InAgentIndex, /*bPadded=*/false);
+	const FVector Dir   = (InTo - InFrom).GetSafeNormal();
+	const FVector Start = InFrom + Dir * AgentRadius;
+	const FVector End   = InTo   - Dir * AgentRadius;
+
+	FCollisionQueryParams QueryParams;
+	if (InIgnoreActor)
+	{
+		QueryParams.AddIgnoredActor(InIgnoreActor);
+	}
+	for (const TWeakObjectPtr<ANavGen3DBoundsVolume>& BoundsVolume : BoundsVolumes)
+	{
+		if (BoundsVolume.IsValid())
+		{
+			QueryParams.AddIgnoredActor(BoundsVolume.Get());
+		}
+	}
+
+	TArray<FHitResult> Hits;
+	World->SweepMultiByObjectType(Hits, Start, End, FQuat::Identity,
+		FCollisionObjectQueryParams(ECC_WorldStatic),
+		FCollisionShape::MakeSphere(AgentRadius), QueryParams);
+
+	for (const FHitResult& Hit : Hits)
+	{
+		if (!Hit.Component.IsValid())
+		{
+			continue;
+		}
+		// Skip query-only components (trigger volumes, overlap zones) — only solid
+		// geometry with physics collision can physically block the agent.
+		const ECollisionEnabled::Type CollisionType = Hit.Component->GetCollisionEnabled();
+		if (CollisionType != ECollisionEnabled::QueryAndPhysics && CollisionType != ECollisionEnabled::PhysicsOnly)
+		{
+			continue;
+		}
+		return false;
+	}
+
+	return true;
+}
+
 bool UNavGen3DSubsystem::PlaneTrace(FVector InMin, FVector InMax, EAxis::Type InAxis, FVector& OutImpactPoint, bool& OutStartPenetrating)
 {
 	OutStartPenetrating = false;

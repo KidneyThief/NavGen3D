@@ -46,8 +46,8 @@ void ANavGen3DAltMover::SimReset(bool bResetPhysics)
 	SimApproachTargetLocation = FVector(FLT_MAX);
 	SimApproachTimer          = 0.0f;
 	SimPathIndex              = 0;
+	SimLookaheadLocation      = FVector(FLT_MAX);
 	bIsApproachingTarget      = false;
-	bSettled                  = false;
 
 	if (SimPathSearchSpace.IsValid())
 	{
@@ -65,11 +65,6 @@ void ANavGen3DAltMover::SimUpdateMovement(float DeltaTime)
 
 	UNavGen3DSubsystem* Subsystem = GEngine ? GEngine->GetEngineSubsystem<UNavGen3DSubsystem>() : nullptr;
 	if (!Subsystem)
-	{
-		return;
-	}
-
-	if (bSettled)
 	{
 		return;
 	}
@@ -136,6 +131,7 @@ void ANavGen3DAltMover::SimUpdateMovement(float DeltaTime)
 	}
 
 	MoveWithSweep(GetActorLocation() + SimVelocity * DeltaTime);
+	UpdateSimRotation(DeltaTime);
 }
 
 void ANavGen3DAltMover::UpdateSimApproachTarget(float DeltaTime)
@@ -191,25 +187,14 @@ void ANavGen3DAltMover::UpdateSimPathNode()
 		return;
 	}
 
-	UWorld* World = GetWorld();
-	if (!World)
-	{
-		return;
-	}
-
 	SimPathIndex = FMath::Clamp(SimPathIndex, 0, Path.Num() - 1);
 
-	const int32  DestIndex   = Path.Num() - 1;
-	const float  AgentRadius = Subsystem->GetAgentCollisionRadius(AgentIndex, /*bPadded=*/false);
-	const FCollisionShape AgentSphere   = FCollisionShape::MakeSphere(AgentRadius);
+	const int32   DestIndex     = Path.Num() - 1;
 	const FVector ActorLocation = GetActorLocation();
 
 	auto HasLOS = [&](const FVector& NodeLocation) -> bool
 	{
-		const FVector Dir   = (NodeLocation - ActorLocation).GetSafeNormal();
-		const FVector Start = ActorLocation + Dir * AgentRadius;
-		const FVector End   = NodeLocation  - Dir * AgentRadius;
-		return !World->SweepTestByChannel(Start, End, FQuat::Identity, ECC_WorldStatic, AgentSphere);
+		return Subsystem->SweepAgentLOS(AgentIndex, ActorLocation, NodeLocation, this);
 	};
 
 	if (SimPathIndex != DestIndex)
@@ -254,6 +239,8 @@ void ANavGen3DAltMover::UpdateSimPathFollowing(float DeltaTime)
 		return;
 	}
 
+	const float AgentRadius = Subsystem->GetAgentCollisionRadius(AgentIndex, /*bPadded=*/false);
+
 	const TArray<FVector>& Path = SimPathSearchSpace->PathSolution;
 	if (!Path.IsValidIndex(SimPathIndex))
 	{
@@ -277,33 +264,118 @@ void ANavGen3DAltMover::UpdateSimPathFollowing(float DeltaTime)
 
 	// Predictive corner braking: determine the target speed we need to arrive at the
 	// current node, then check whether we need to start braking now to reach it.
-	float TargetSpeed = SimMaxVelocity;
+	float TargetSpeed    = SimMaxVelocity;
+	float BrakingDistance = 0.0f;
 
 	const int32 DestIndex = Path.Num() - 1;
 	if (SimPathIndex < DestIndex)
 	{
-		// Corner sharpness at the current node: dot product of incoming and outgoing segments.
 		const FVector IncomingDir = ToNode;
 		const FVector OutgoingDir = (Path[SimPathIndex + 1] - NodeLocation).GetSafeNormal();
 		const float   CornerDot   = FVector::DotProduct(IncomingDir, OutgoingDir);
+		const float   CornerSpeed = SimMaxVelocity * FMath::Max(0.0f, CornerDot);
 
-		// Target speed at the corner — zero for a U-turn, full speed for a straight.
-		const float CornerSpeed = SimMaxVelocity * FMath::Max(0.0f, CornerDot);
-
-		// Braking distance needed to decelerate from CurrentSpeed to CornerSpeed.
-		const float SpeedDeltaSq     = CurrentSpeed * CurrentSpeed - CornerSpeed * CornerSpeed;
-		const float BrakingDistance  = SpeedDeltaSq > 0.0f ? SpeedDeltaSq / (2.0f * SimAcceleration) : 0.0f;
+		const float SpeedDeltaSq = CurrentSpeed * CurrentSpeed - CornerSpeed * CornerSpeed;
+		BrakingDistance = SpeedDeltaSq > 0.0f ? SpeedDeltaSq / (2.0f * SimAcceleration) : 0.0f;
 
 		if (DistToNode <= BrakingDistance)
 		{
-			// Within braking range — use the sqrt profile so we arrive at the node
-			// doing exactly CornerSpeed.
 			TargetSpeed = FMath::Sqrt(CornerSpeed * CornerSpeed + 2.0f * SimAcceleration * DistToNode);
 		}
 	}
 
 	const FVector DesiredVelocity = ToNode * FMath::Min(TargetSpeed, SimMaxVelocity);
 	SimPathVector = (DesiredVelocity - SimVelocity).GetSafeNormal();
+
+	const float LookaheadDist = FMath::Max(BrakingDistance, AgentRadius * 2.0f);
+	PathLookAhead(Path, GetActorLocation(), LookaheadDist, SimLookaheadLocation);
+}
+
+bool ANavGen3DAltMover::PathLookAhead(const TArray<FVector>& InPath, const FVector& InLocation, float InDistance, FVector& OutLocation)
+{
+	if (InPath.IsEmpty())
+	{
+		return false;
+	}
+
+	// Find the nearest point on the path by projecting onto each segment.
+	FVector NearestPoint  = InPath[0];
+	int32   NearestSeg    = 0;
+	float   NearestDistSq = FVector::DistSquared(InLocation, InPath[0]);
+
+	for (int32 i = 0; i + 1 < InPath.Num(); ++i)
+	{
+		const FVector AB      = InPath[i + 1] - InPath[i];
+		const float   ABLenSq = AB.SizeSquared();
+		if (ABLenSq < KINDA_SMALL_NUMBER) continue;
+
+		const float   t    = FMath::Clamp(FVector::DotProduct(InLocation - InPath[i], AB) / ABLenSq, 0.0f, 1.0f);
+		const FVector Proj = InPath[i] + AB * t;
+		const float   DistSq = FVector::DistSquared(InLocation, Proj);
+		if (DistSq < NearestDistSq)
+		{
+			NearestDistSq = DistSq;
+			NearestPoint  = Proj;
+			NearestSeg    = i;
+		}
+	}
+
+	// Walk InDistance forward along the path from NearestPoint.
+	float Remaining = InDistance;
+
+	if (NearestSeg + 1 < InPath.Num())
+	{
+		const float DistToSegEnd = FVector::Distance(NearestPoint, InPath[NearestSeg + 1]);
+		if (Remaining <= DistToSegEnd)
+		{
+			OutLocation = NearestPoint + (InPath[NearestSeg + 1] - NearestPoint).GetSafeNormal() * Remaining;
+			return true;
+		}
+		Remaining -= DistToSegEnd;
+	}
+
+	for (int32 i = NearestSeg + 1; i + 1 < InPath.Num(); ++i)
+	{
+		const float SegLen = FVector::Distance(InPath[i], InPath[i + 1]);
+		if (SegLen < KINDA_SMALL_NUMBER) continue;
+		if (Remaining <= SegLen)
+		{
+			OutLocation = InPath[i] + (InPath[i + 1] - InPath[i]).GetSafeNormal() * Remaining;
+			return true;
+		}
+		Remaining -= SegLen;
+	}
+
+	OutLocation = InPath.Last();
+	return true;
+}
+
+void ANavGen3DAltMover::UpdateSimRotation(float DeltaTime)
+{
+	FVector LookTarget = FVector(FLT_MAX);
+
+	if (bIsApproachingTarget && SimApproachTargetLocation.X < FLT_MAX)
+	{
+		LookTarget = SimApproachTargetLocation;
+	}
+	else if (SimLookaheadLocation.X < FLT_MAX)
+	{
+		LookTarget = SimLookaheadLocation;
+	}
+
+	if (LookTarget.X >= FLT_MAX)
+	{
+		return;
+	}
+
+	const FVector ToTarget = (LookTarget - GetActorLocation()).GetSafeNormal();
+	if (ToTarget.IsNearlyZero())
+	{
+		return;
+	}
+
+	const FRotator TargetRot = ToTarget.Rotation();
+	SetActorRotation(FMath::RInterpConstantTo(GetActorRotation(), TargetRot, DeltaTime, SimTurnRate));
 }
 
 bool ANavGen3DAltMover::IsApproachingTarget()
@@ -323,13 +395,21 @@ bool ANavGen3DAltMover::IsApproachingTarget()
 
 	const float Dist = FVector::Dist(GetActorLocation(), TargetLocation);
 
+	auto HasLOS = [&]() -> bool
+	{
+		return Subsystem->SweepAgentLOS(AgentIndex, GetActorLocation(), TargetLocation, this);
+	};
+
 	if (!bIsApproachingTarget)
 	{
 		if (Dist >= ApproachDistMin * 1.15f && Dist <= ApproachDistMax * 0.85f)
 		{
-			bIsApproachingTarget      = true;
-			SimApproachTimer          = 2.0f;
-			SimApproachTargetLocation = TargetLocation;
+			if (HasLOS())
+			{
+				bIsApproachingTarget      = true;
+				SimApproachTimer          = 2.0f;
+				SimApproachTargetLocation = TargetLocation;
+			}
 		}
 	}
 	else
@@ -340,17 +420,9 @@ bool ANavGen3DAltMover::IsApproachingTarget()
 			{
 				bIsApproachingTarget = false;
 			}
-			else
+			else if (!HasLOS())
 			{
-				const float   AgentRadius = Subsystem->GetAgentCollisionRadius(AgentIndex, /*bPadded=*/false);
-				const FVector Dir         = (TargetLocation - GetActorLocation()).GetSafeNormal();
-				const FVector Start       = GetActorLocation() + Dir * AgentRadius;
-				const FVector End         = TargetLocation    - Dir * AgentRadius;
-				const bool bHasLOS        = !World->SweepTestByChannel(Start, End, FQuat::Identity, ECC_WorldStatic, FCollisionShape::MakeSphere(AgentRadius));
-				if (!bHasLOS)
-				{
-					bIsApproachingTarget = false;
-				}
+				bIsApproachingTarget = false;
 			}
 		}
 	}
@@ -473,7 +545,8 @@ void ANavGen3DAltMover::MoveWithSweep(const FVector& NewLocation)
 				{
 					continue;
 				}
-				if (Overlap.Component->GetCollisionEnabled() == ECollisionEnabled::NoCollision)
+				const ECollisionEnabled::Type CT = Overlap.Component->GetCollisionEnabled();
+				if (CT != ECollisionEnabled::QueryAndPhysics && CT != ECollisionEnabled::PhysicsOnly)
 				{
 					continue;
 				}
@@ -494,8 +567,25 @@ void ANavGen3DAltMover::MoveWithSweep(const FVector& NewLocation)
 	SetActorLocation(SafeStart);
 
 	// Sweep from the depenetrated position to the desired destination.
+	// Use multi + filter so query-only volumes (triggers, overlap zones) don't block movement.
+	FCollisionQueryParams SweepParams;
+	SweepParams.AddIgnoredActor(this);
+
+	TArray<FHitResult> Hits;
+	World->SweepMultiByObjectType(Hits, SafeStart, NewLocation, FQuat::Identity,
+		FCollisionObjectQueryParams(ECC_WorldStatic), AgentSphere, SweepParams);
+
 	FHitResult Hit;
-	const bool bBlocked = World->SweepSingleByChannel(Hit, SafeStart, NewLocation, FQuat::Identity, ECC_WorldStatic, AgentSphere);
+	bool bBlocked = false;
+	for (FHitResult& Candidate : Hits)
+	{
+		if (!Candidate.Component.IsValid()) continue;
+		const ECollisionEnabled::Type CT = Candidate.Component->GetCollisionEnabled();
+		if (CT != ECollisionEnabled::QueryAndPhysics && CT != ECollisionEnabled::PhysicsOnly) continue;
+		Hit      = Candidate;
+		bBlocked = true;
+		break;
+	}
 
 	if (!bBlocked)
 	{
@@ -505,18 +595,18 @@ void ANavGen3DAltMover::MoveWithSweep(const FVector& NewLocation)
 
 	if (Hit.bStartPenetrating)
 	{
-		const FVector MoveDir = (NewLocation - SafeStart).GetSafeNormal();
-		if (!Hit.Normal.IsNearlyZero() && FVector::DotProduct(Hit.Normal, MoveDir) > 0.0f)
+		// ImpactPoint is unreliable when start-penetrating; use the MTD normal instead —
+		// it points away from the blocking geometry, the same role DeflectDir plays below.
+		SetActorLocation(SafeStart);
+		const FVector DeflectDir = Hit.Normal.GetSafeNormal();
+		if (!DeflectDir.IsNearlyZero())
 		{
-			// Penetrating geometry is behind our movement direction — we're already moving
-			// away from it, so allow the move and let the penetration self-resolve.
-			SetActorLocation(NewLocation);
-			return;
+			SimVelocity = DeflectDir * FMath::Max(0.0f, FVector::DotProduct(SimVelocity, DeflectDir));
 		}
-
-		// Geometry is ahead of or across our path; zero velocity so seek steering
-		// recomputes from rest next frame rather than pushing deeper into the block.
-		SimVelocity = FVector::ZeroVector;
+		else
+		{
+			SimVelocity = FVector::ZeroVector;
+		}
 		return;
 	}
 
@@ -552,7 +642,7 @@ void ANavGen3DAltMover::DebugDraw()
 
 	const float   Radius = Subsystem->GetAgentCollisionRadius(AgentIndex, /*bPadded=*/false);
 	const FVector Center = GetActorLocation();
-	const FColor  Color  = bSettled ? FColor::Green : FColor::Cyan;
+	const FColor  Color  = bIsApproachingTarget ? FColor::Green : FColor::Orange;
 
 	if (bDebugDrawAsArrow)
 	{

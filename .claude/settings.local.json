@@ -21,7 +21,26 @@
       "PowerShell(& \"C:\\\\Program Files\\\\Epic Games\\\\UE_5.3\\\\Engine\\\\Binaries\\\\DotNET\\\\UnrealBuildTool\\\\UnrealBuildTool.exe\" -projectfiles -project=\"C:\\\\cygwin64\\\\home\\\\kidne\\\\_DEV\\\\NavGen3D\\\\NavGen3D\\\\NavGen3D.uproject\" -game -rocket -progress 2>&1)",
       "Bash(Get-Content \"C:\\\\cygwin64\\\\home\\\\kidne\\\\_DEV\\\\NavGen3D\\\\NavGen3D\\\\Plugins\\\\NavGen3DPlugin\\\\Source\\\\NavGen3DPlugin\\\\Private\\\\NavGen3DSubsystem.cpp\")",
       "Bash(Measure-Object -Line)",
-      "PowerShell(\\(Get-Content \"C:\\\\cygwin64\\\\home\\\\kidne\\\\_DEV\\\\NavGen3D\\\\NavGen3D\\\\Plugins\\\\NavGen3DPlugin\\\\Source\\\\NavGen3DPlugin\\\\Private\\\\NavGen3DSubsystem.cpp\" | Measure-Object -Line\\).Lines; \\(Get-Content \"C:\\\\cygwin64\\\\home\\\\kidne\\\\_DEV\\\\NavGen3D\\\\NavGen3D\\\\Plugins\\\\NavGen3DPlugin\\\\Source\\\\NavGen3DPlugin\\\\Private\\\\SNavGen3DWindow.cpp\" | Measure-Object -Line\\).Lines)"
+      "PowerShell(\\(Get-Content \"C:\\\\cygwin64\\\\home\\\\kidne\\\\_DEV\\\\NavGen3D\\\\NavGen3D\\\\Plugins\\\\NavGen3DPlugin\\\\Source\\\\NavGen3DPlugin\\\\Private\\\\NavGen3DSubsystem.cpp\" | Measure-Object -Line\\).Lines; \\(Get-Content \"C:\\\\cygwin64\\\\home\\\\kidne\\\\_DEV\\\\NavGen3D\\\\NavGen3D\\\\Plugins\\\\NavGen3DPlugin\\\\Source\\\\NavGen3DPlugin\\\\Private\\\\SNavGen3DWindow.cpp\" | Measure-Object -Line\\).Lines)",
+      "Bash(g++ -std=c++20 -O2 -o test_dfs test_dfs.cpp)",
+      "Bash(./test_dfs.exe)",
+      "Bash(where g++)",
+      "Bash(where clang++)",
+      "Bash(where cl *)",
+      "Read(//cygdrive/c/Program Files/**)",
+      "Bash(cmd //c \"cl.bat /std:c++20 /EHsc /nologo test_dfs.cpp /Fe:test_dfs.exe\")",
+      "Read(//cygdrive/c/_BATCH/**)",
+      "Read(//cygdrive/c/Program Files \\\\\\(x86\\\\\\)/**)",
+      "Bash(cd C:\\\\Users\\\\kidne\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--cygwin64-home-kidne--DEV-NavGen3D-NavGen3D-Plugins-NavGen3DPlugin\\\\f45b9277-405d-4f6c-81ce-e2c742dc91d8\\\\scratchpad *)",
+      "Bash(cmd /c '\"C:\\\\Program Files\\\\Microsoft Visual Studio\\\\2022\\\\Community\\\\VC\\\\Auxiliary\\\\Build\\\\vcvars64.bat\" >nul && cl /std:c++20 /EHsc /nologo test_dfs_fixed.cpp /Fe:test_dfs_fixed.exe')",
+      "Bash(./test_dfs_fixed.exe)",
+      "Bash(cmd /c '\"C:\\\\Program Files\\\\Microsoft Visual Studio\\\\2022\\\\Community\\\\VC\\\\Auxiliary\\\\Build\\\\vcvars64.bat\" && cl /std:c++20 /EHsc /nologo test_dfs_fixed.cpp /Fe:test_dfs_fixed.exe')",
+      "Bash(timeout 60 ./test_dfs_nocache.exe)",
+      "Bash(timeout 45 ./test_dfs_v3.exe)",
+      "Bash(timeout 100 ./test_dfs_perf.exe)",
+      "Bash(timeout 90 ./test_dfs_real.exe)",
+      "Bash(./test_bfs_final.exe)",
+      "Bash(./test_pa_dfs.exe)"
     ]
   }
 }
