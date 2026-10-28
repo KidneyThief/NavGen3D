@@ -291,6 +291,35 @@ void SNavGen3DWindow::Construct(const FArguments& InArgs)
 						.AutoHeight()
 						.Padding(8.0f, 4.0f, 8.0f, 4.0f)
 						[
+							SNew(SHorizontalBox)
+							+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+							[ SNew(STextBlock).Text(FText::FromString("Axis Aligned:  ")).ColorAndOpacity(TextColor) ]
+							+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+							[ SNew(SCheckBox).IsChecked(this, &SNavGen3DWindow::GetAxisAlignedState).OnCheckStateChanged(this, &SNavGen3DWindow::OnAxisAlignedChanged).IsEnabled(this, &SNavGen3DWindow::IsNotPlayMode) ]
+						]
+
+						+ SVerticalBox::Slot()
+						.AutoHeight()
+						.Padding(8.0f, 4.0f, 8.0f, 4.0f)
+						[
+							SNew(SHorizontalBox)
+							+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+							[ SNew(STextBlock).Text(FText::FromString("Min Volume Size:")).ColorAndOpacity(TextColor) ]
+							+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center).Padding(8.0f, 0.0f, 0.0f, 0.0f)
+							[
+								SNew(SSlider)
+								.MinValue(-1.0f).MaxValue(100.0f).StepSize(1.0f)
+								.Value(this, &SNavGen3DWindow::GetMinVolumeSize)
+								.OnValueChanged(this, &SNavGen3DWindow::OnMinVolumeSizeChanged)
+							]
+							+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(8.0f, 0.0f, 0.0f, 0.0f)
+							[ SNew(STextBlock).Text(this, &SNavGen3DWindow::GetMinVolumeSizeText).ColorAndOpacity(TextColor) ]
+						]
+
+						+ SVerticalBox::Slot()
+						.AutoHeight()
+						.Padding(8.0f, 4.0f, 8.0f, 4.0f)
+						[
 							SNew(SUniformGridPanel)
 							.SlotPadding(FMargin(0.0f, 4.0f, 0.0f, 0.0f))
 							+ SUniformGridPanel::Slot(0, 0)
@@ -666,7 +695,7 @@ FText SNavGen3DWindow::GetCameraVolumeText() const
 	if (UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
 	{
 		const FVector CameraLocation = Subsystem->GetCameraLocation();
-		if (NavMeshVolume* Volume = Subsystem->FindVolumeContainingLocation(CameraLocation))
+		if (NavMeshVolumeBase* Volume = Subsystem->FindVolumeContainingLocation(CameraLocation))
 		{
 			return FText::FromString(FString::Printf(TEXT("[%llu] %s"),
 				Volume->ID,
@@ -1097,6 +1126,54 @@ FText SNavGen3DWindow::GetSolutionVolumeCountText() const
 	return FText::AsNumber(0);
 }
 
+ECheckBoxState SNavGen3DWindow::GetAxisAlignedState() const
+{
+	if (const UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
+	{
+		return Subsystem->AxisAligned ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+	}
+	return ECheckBoxState::Unchecked;
+}
+
+void SNavGen3DWindow::OnAxisAlignedChanged(ECheckBoxState InNewState)
+{
+	if (UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
+	{
+		Subsystem->AxisAligned = (InNewState == ECheckBoxState::Checked);
+		// Volumes of the previous type can't be mixed with the new one, so start over
+		Subsystem->InitializeNavMesh3D();
+	}
+}
+
+float SNavGen3DWindow::GetMinVolumeSize() const
+{
+	if (const UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
+	{
+		return Subsystem->MinSolutionVolumeSize;
+	}
+	return -1.0f;
+}
+
+FText SNavGen3DWindow::GetMinVolumeSizeText() const
+{
+	if (const UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
+	{
+		if (Subsystem->MinSolutionVolumeSize >= 0.0f)
+		{
+			return FText::FromString(FString::Printf(TEXT("%.0f"), Subsystem->MinSolutionVolumeSize));
+		}
+	}
+	return FText::FromString(TEXT("Agent"));
+}
+
+void SNavGen3DWindow::OnMinVolumeSizeChanged(float InNewValue)
+{
+	if (UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
+	{
+		Subsystem->MinSolutionVolumeSize = (float)FMath::RoundToInt(InNewValue);
+	}
+}
+
 FReply SNavGen3DWindow::OnResetNavMesh3DClicked()
 {
 	if (UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
@@ -1110,19 +1187,20 @@ FReply SNavGen3DWindow::OnProcessNextVolumeClicked()
 {
 	if (UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
 	{
-		TOptional<NavMeshVolume> NextVolume = Subsystem->PopNextProcessingVolume();
-		if (!NextVolume.IsSet())
+		NavMeshVolumeBase* NextVolume = Subsystem->PopNextProcessingVolume();
+		if (!NextVolume)
 		{
 			const FVector CameraLocation = Subsystem->GetCameraLocation();
 			NextVolume = Subsystem->FindGenerationVolumeContainingLocation(CameraLocation, true);
-			if (!NextVolume.IsSet())
+			if (!NextVolume)
 			{
 				NextVolume = Subsystem->FindClosestGenerationVolume(CameraLocation, true);
 			}
 		}
-		if (NextVolume.IsSet())
+		if (NextVolume)
 		{
-			Subsystem->DebugProcessSingleVolume(NextVolume.GetValue(), true);
+			Subsystem->DebugProcessSingleVolume(*NextVolume, true);
+			delete NextVolume;
 		}
 	}
 	return FReply::Handled();
@@ -1143,14 +1221,15 @@ FReply SNavGen3DWindow::OnProcessCameraVolumeClicked()
 	{
 		const FVector CameraLocation = Subsystem->GetCameraLocation();
 
-		TOptional<NavMeshVolume> GenVolume = Subsystem->FindGenerationVolumeContainingLocation(CameraLocation, true);
-		if (!GenVolume.IsSet())
+		NavMeshVolumeBase* GenVolume = Subsystem->FindGenerationVolumeContainingLocation(CameraLocation, true);
+		if (!GenVolume)
 		{
 			GenVolume = Subsystem->FindClosestGenerationVolume(CameraLocation, true);
 		}
-		if (GenVolume.IsSet())
+		if (GenVolume)
 		{
-			Subsystem->DebugProcessSingleVolume(GenVolume.GetValue(), true);
+			Subsystem->DebugProcessSingleVolume(*GenVolume, true);
+			delete GenVolume;
 		}
 	}
 	return FReply::Handled();
@@ -1197,7 +1276,7 @@ FReply SNavGen3DWindow::OnValidateCameraVolumeClicked()
 	if (UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
 	{
 		const FVector CameraLocation = Subsystem->GetCameraLocation();
-		NavMeshVolume* Volume = Subsystem->FindVolumeContainingLocation(CameraLocation);
+		NavMeshVolumeBase* Volume = Subsystem->FindVolumeContainingLocation(CameraLocation);
 		Subsystem->ValidateNavMesh3D(Volume);
 	}
 	return FReply::Handled();
@@ -1208,7 +1287,7 @@ FReply SNavGen3DWindow::OnFindCameraVolumeConnectionsClicked()
 	if (UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
 	{
 		const FVector CameraLocation = Subsystem->GetCameraLocation();
-		NavMeshVolume* Volume = Subsystem->FindVolumeContainingLocation(CameraLocation);
+		NavMeshVolumeBase* Volume = Subsystem->FindVolumeContainingLocation(CameraLocation);
 		if (Volume)
 		{
 			const FCollisionShape Sphere = FCollisionShape::MakeSphere(Subsystem->GetAgentCollisionRadius(Subsystem->DebugNavMeshAgentIndex, true));

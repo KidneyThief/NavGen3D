@@ -48,7 +48,7 @@ struct FNavGen3DGeneratedVolume
 	UPROPERTY()
 	FVector BoundsMax = FVector::ZeroVector;
 
-	// Indexed by agent index — replaces the TMap<int32,int32> on NavMeshVolume
+	// Indexed by agent index — replaces the TMap<int32,int32> on NavMeshVolumeBase
 	UPROPERTY()
 	TArray<int32> ConnectivityIDs;
 

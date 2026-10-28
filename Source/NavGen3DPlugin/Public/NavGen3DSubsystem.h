@@ -9,6 +9,7 @@
 #include "NavGen3DBoundsVolumeAsset.h"
 #include "NavGen3DLog.h"
 #include "NavMeshVolume.h"
+#include "NavMesh3DVolume.h"
 #include "NavGen3DSubsystem.generated.h"
 
 UENUM()
@@ -74,17 +75,18 @@ public:
 	void RemoveBoundsVolume(ANavGen3DBoundsVolume* InVolume);
 	void InitializeNavMesh3D();
 	bool GenerateNavMesh3DFromBoundsVolume(ANavGen3DBoundsVolume* InVolume);
-	bool GenerateNavMesh3D(NavMeshVolume* InVolume = nullptr);
-	bool PlaneTrace(FVector InMin, FVector InMax, EAxis::Type InAxis, FVector& OutImpactPoint, bool& OutStartPenetrating);
+	bool GenerateNavMesh3D(NavMeshVolumeBase* InVolume = nullptr);
+	bool PlaneTrace(FVector InMin, FVector InMax, EAxis::Type InAxis, FVector& OutImpactPoint, bool& OutStartPenetrating, FVector* OutImpactNormal = nullptr);
 	bool ValidateConnectionCollision(const FCollisionShape& InSphere, const FVector& InStart, const FVector& InEnd);
 	bool SweepAgentLOS(int32 InAgentIndex, const FVector& InFrom, const FVector& InTo, AActor* InIgnoreActor = nullptr) const;
-	bool AddNavMeshVolume(NavMeshVolume& RefVolume);
+	bool AddNavMeshVolume(NavMeshVolumeBase& RefVolume);
 	void RemoveNavMeshVolume(uint64 InID);
-	bool ProcessNavMeshVolume(NavMeshVolume& RefVolume, bool InDrawDebug = false);
-	bool ProcessNavMeshVolumeInterior(NavMeshVolume& RefVolume, bool InDrawDebug = false);
-	void SplitAlongLongestAxis(NavMeshVolume& RefVolume, bool InDrawDebug, const FString& InActorName);
+	bool ProcessNavMeshVolume(NavMeshVolumeBase& RefVolume, bool InDrawDebug = false);
+	bool ProcessNavMesh3DVolume(NavMesh3DVolume& RefVolume, bool InDrawDebug = false);
+	bool ProcessNavMeshVolumeInterior(NavMeshVolumeBase& RefVolume, bool InDrawDebug = false);
+	void SplitAlongLongestAxis(NavMeshVolumeBase& RefVolume, bool InDrawDebug, const FString& InActorName);
 	void ValidateEmbeddedBoundsVolumes();
-	bool ValidateNavMesh3D(NavMeshVolume* InVolume = nullptr);
+	bool ValidateNavMesh3D(NavMeshVolumeBase* InVolume = nullptr);
 	void PruneNavMesh3D();
 	void DetermineConnectivity();
 	void SetNavGen3DWindow(TSharedPtr<SNavGen3DWindow> InWindow);
@@ -96,9 +98,9 @@ public:
 	float GetAgentCollisionRadius(int32 InAgentIndex, bool bPadded) const;
 	int32 GetSupportedAgentCount() const;
 	bool GenerateNavMesh3DConnections(int32 InAgentIndex);
-	NavMeshVolume* FindNavMeshVolumeByID(uint64 InID);
-	void FindNavMeshVolumeConnections(int32 InAgentIndex, const FCollisionShape& InSphere, const NavMeshVolume& InSourceVolume);
-	bool FindNavMeshVolumeConnection(int32 InAgentIndex, const FCollisionShape& InSphere, const NavMeshVolume& InSourceVolume, const NavMeshVolume& InNeighborVolume, int32 InAxis, FVector& OutLocation, int32& OutConnectionAxis);
+	NavMeshVolumeBase* FindNavMeshVolumeByID(uint64 InID) const;
+	void FindNavMeshVolumeConnections(int32 InAgentIndex, const FCollisionShape& InSphere, const NavMeshVolumeBase& InSourceVolume);
+	bool FindNavMeshVolumeConnection(int32 InAgentIndex, const FCollisionShape& InSphere, const NavMeshVolumeBase& InSourceVolume, const NavMeshVolumeBase& InNeighborVolume, int32 InAxis, FVector& OutLocation, int32& OutConnectionAxis);
 	const TArray<FNavVolumeConnection>* GetVolumeConnections(int32 InAgentIndex, uint64 InVolumeID) const;
 
 	static inline FString FVectorToString(const FVector& InVec)
@@ -109,23 +111,26 @@ public:
 	inline static uint64 NavMeshAssetVersion = 1;
 	int32 GetProcessVolumesCount() const { return ProcessVolumesList.Num(); }
 	int32 GetSolutionVolumesCount() const { return NavMeshSolutionMap.Num(); }
-	const TMap<uint64, NavMeshVolume>& GetNavMeshSolutionMap() const { return NavMeshSolutionMap; }
+	const TMap<uint64, NavMeshVolumeBase*>& GetNavMeshSolutionMap() const { return NavMeshSolutionMap; }
 	const TMap<int32, TMap<uint64, TArray<FNavVolumeConnection>>>& GetNavVolumeConnectionMap() const { return NavVolumeConnectionMap; }
 	void AddGeneratedVolumeToSolution(const FNavGen3DGeneratedVolume& InGeneratedVolume, ANavGen3DBoundsVolume* InParent);
 	uint64 CalculateHash3D(const FVector& InVec) const;
-	NavMeshVolume* FindVolumeContainingLocation(const FVector& InLocation);
-	NavMeshVolume* FindClosestVolumeContainingLocation(int32 InAgentIndex, const FVector& InLocation, int32 InConnectivityID = 0, bool bPaddedRadius = true);
+	NavMeshVolumeBase* FindVolumeContainingLocation(const FVector& InLocation);
+	NavMeshVolumeBase* FindClosestVolumeContainingLocation(int32 InAgentIndex, const FVector& InLocation, int32 InConnectivityID = 0, bool bPaddedRadius = true);
 	bool PathFind(FPathSearchSpace& InSearchSpace);
 	void FindPathPostProcess(FPathSearchSpace& InSearchSpace);
 	bool RegisterPathSearchSpace(const TSharedPtr<FPathSearchSpace>& InSearchSpace);
 	void ProcessPathSearchList();
 	void DebugFindPath(FVector InOrigin = InvalidLocation, FVector InDestination = InvalidLocation);
 	bool DebugValidatePath(const FPathSearchSpace& InSearchSpace);
-	TOptional<NavMeshVolume> FindGenerationVolumeContainingLocation(const FVector& InLocation, bool InRemoveFromProcessing);
-	TOptional<NavMeshVolume> FindClosestGenerationVolume(const FVector& InLocation, bool InRemoveFromProcessing);
-	TOptional<NavMeshVolume> PopNextProcessingVolume();
+	// The returned volume is owned by the caller, who must delete it (nullptr if none found)
+	NavMeshVolumeBase* FindGenerationVolumeContainingLocation(const FVector& InLocation, bool InRemoveFromProcessing);
+	NavMeshVolumeBase* FindClosestGenerationVolume(const FVector& InLocation, bool InRemoveFromProcessing);
+	NavMeshVolumeBase* PopNextProcessingVolume();
+	// Creates a new volume of the type used for generation; the caller owns the result
+	NavMeshVolumeBase* CreateNavMeshVolume() const;
 	float GetProcessMinVolumeSize(const FBox& InBounds, const TWeakObjectPtr<ANavGen3DBoundsVolume>& InParent) const;
-	void DebugProcessSingleVolume(NavMeshVolume& InVolume, bool bDrawDebug);
+	void DebugProcessSingleVolume(NavMeshVolumeBase& InVolume, bool bDrawDebug);
 	void DebugUndoLastProcess();
 	bool HasDebugUndoState() const { return DebugUndoState.bIsValid; }
 
@@ -140,6 +145,15 @@ public:
 
 	UPROPERTY()
 	bool DrawConnectivity = false;
+
+	// Selects the volume type created during generation; changing it requires a reset
+	UPROPERTY()
+	bool AxisAligned = true;
+
+	// Smallest side length (uu) a solution volume may have on at least two axes. Below 0, the
+	// limit comes from the supported agents' padded collision radius instead.
+	UPROPERTY()
+	float MinSolutionVolumeSize = -1.0f;
 
 	UPROPERTY()
 	bool PathSmoothingEnabled = true;
@@ -193,11 +207,15 @@ private:
 
 private:
 	void DebugDrawUpdate();
+	void ClearSolutionVolumes();
+	void ClearProcessVolumes();
+	void ClearDebugUndoState();
 
+	// Owns ProcessedVolume and the volumes in SolutionMapSnapshot
 	struct FDebugProcessUndoState
 	{
-		NavMeshVolume ProcessedVolume;
-		TMap<uint64, NavMeshVolume> SolutionMapSnapshot;
+		NavMeshVolumeBase* ProcessedVolume = nullptr;
+		TMap<uint64, NavMeshVolumeBase*> SolutionMapSnapshot;
 		TMap<uint64, TArray<uint64>> SolutionByLocationSnapshot;
 		TMap<uint64, uint64> VolumeMap_X_Snapshot;
 		TMap<uint64, uint64> VolumeMap_Y_Snapshot;
@@ -211,9 +229,10 @@ private:
 	TWeakPtr<SNavGen3DWindow> NavGen3DWindowPtr;
 
 	inline static uint64 NavMeshVolumeIDGenerator = 0;
-	TMap<uint64, NavMeshVolume> NavMeshSolutionMap;
+	// Both containers own their volumes: delete when removing an entry
+	TMap<uint64, NavMeshVolumeBase*> NavMeshSolutionMap;
 	TMap<uint64, TArray<uint64>> NavMeshSolutionMapByLocation;
-	TArray<NavMeshVolume> ProcessVolumesList;
+	TArray<NavMeshVolumeBase*> ProcessVolumesList;
 	TMap<uint64, uint64> NavMeshVolumeMap_X;
 	TMap<uint64, uint64> NavMeshVolumeMap_Y;
 	TMap<uint64, uint64> NavMeshVolumeMap_Z;

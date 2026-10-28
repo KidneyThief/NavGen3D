@@ -126,7 +126,7 @@ void ANavGen3DBoundsVolume::SaveGeneratedAsset()
 
 		for (auto& Pair : Subsystem->GetNavMeshSolutionMap())
 		{
-			const NavMeshVolume& Volume = Pair.Value;
+			const NavMeshVolumeBase& Volume = *Pair.Value;
 			if (Volume.ParentBoundsVolume != this)
 			{
 				continue;
