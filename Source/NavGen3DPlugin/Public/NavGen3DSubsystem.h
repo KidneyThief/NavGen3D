@@ -81,6 +81,10 @@ public:
 	bool ValidateConnectionCollision(const FCollisionShape& InSphere, const FVector& InStart, const FVector& InEnd);
 	bool SweepAgentLOS(int32 InAgentIndex, const FVector& InFrom, const FVector& InTo, AActor* InIgnoreActor = nullptr) const;
 	bool AddNavMeshVolume(NavMeshVolumeBase& RefVolume);
+	// The size rule for solution volumes (see MinSolutionVolumeSize). Also used to drop queued
+	// volumes early: anything cut from a volume failing it can only be smaller, so fails it too.
+	// With MinSolutionVolumeSize >= 0, every side must reach it.
+	bool ValidateSolutionVolumeSize(const FBox& InBounds) const;
 	void RemoveNavMeshVolume(uint64 InID);
 	bool ProcessNavMeshVolume(NavMeshVolumeBase& RefVolume, bool InDrawDebug = false);
 	bool ProcessNavMesh3DVolume(NavMesh3DVolume& RefVolume, bool InDrawDebug = false);
@@ -151,10 +155,10 @@ public:
 	UPROPERTY(Config)
 	bool AxisAligned = false;
 
-	// Smallest side length (uu) a solution volume may have on at least two axes. Below 0, the
+	// Smallest side length (uu) any solution or queued volume may have on every axis. Below 0, the
 	// limit comes from the supported agents' padded collision radius instead.
 	UPROPERTY(Config)
-	float MinSolutionVolumeSize = 0.0f;
+	float MinSolutionVolumeSize = 1.0f;
 
 	UPROPERTY()
 	bool PathSmoothingEnabled = true;
@@ -193,6 +197,9 @@ public:
 	FVector DebugPathDestination = InvalidLocation;
 
 	FPathSearchSpace DebugPathSearchSpace;
+
+	// Volumes processed by the last full GenerateNavMesh3D run
+	int32 LastGenerationIterations = 0;
 
 	TArray<TWeakObjectPtr<ANavGen3DBoundsVolume>> BoundsVolumes;
 

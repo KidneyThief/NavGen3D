@@ -309,7 +309,7 @@ void SNavGen3DWindow::Construct(const FArguments& InArgs)
 							+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center).Padding(8.0f, 0.0f, 0.0f, 0.0f)
 							[
 								SNew(SSlider)
-								.MinValue(-1.0f).MaxValue(100.0f).StepSize(1.0f)
+								.MinValue(1.0f).MaxValue(100.0f).StepSize(1.0f)
 								.Value(this, &SNavGen3DWindow::GetMinVolumeSize)
 								.OnValueChanged(this, &SNavGen3DWindow::OnMinVolumeSizeChanged)
 							]
