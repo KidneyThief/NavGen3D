@@ -26,6 +26,15 @@ namespace NavGen3DClip
 	constexpr float ClipPointRadius = 15.0f;
 	// Distance (uu) within which an impact point counts as lying on a surface plane
 	constexpr float CornerPlaneTolerance = 1.0f;
+	// Two surfaces form a corner only if their normals differ by more than ~8 degrees
+	constexpr float CornerMaxNormalDot = 0.99f;
+	// Steps across a volume when searching inward from a face that starts inside geometry for the
+	// first clear slice
+	constexpr int32 ClearSliceSteps = 64;
+	// Inset (uu) of the plane traces from each side of the volume, so touching geometry is ignored
+	constexpr float TraceInset = 1.0f;
+	// Generation gives up after this many processed volumes per allowed solution volume
+	constexpr int32 MaxProcessIterationsPerVolume = 16;
 
 	bool IsAxisAlignedNormal(const FVector& InNormal)
 	{
@@ -71,6 +80,23 @@ namespace NavGen3DClip
 				}
 			}
 		}
+	}
+
+	// Point on the line where two planes meet, nearest InNearPoint. False if the planes are parallel.
+	bool GetPlaneIntersectionPoint(const FVector& InPointA, const FVector& InNormalA, const FVector& InPointB, const FVector& InNormalB,
+		const FVector& InNearPoint, FVector& OutPoint)
+	{
+		const FVector LineDir = FVector::CrossProduct(InNormalA, InNormalB);
+		const float LineDirSizeSq = LineDir.SizeSquared();
+		if (LineDirSizeSq < KINDA_SMALL_NUMBER) return false;
+
+		const float DistA = InNormalA | InPointA;
+		const float DistB = InNormalB | InPointB;
+		const FVector PointOnLine = (DistA * FVector::CrossProduct(InNormalB, LineDir) + DistB * FVector::CrossProduct(LineDir, InNormalA)) / LineDirSizeSq;
+
+		const FVector UnitDir = LineDir / FMath::Sqrt(LineDirSizeSq);
+		OutPoint = PointOnLine + UnitDir * ((InNearPoint - PointOnLine) | UnitDir);
+		return true;
 	}
 
 	// <= 0 is the valid side of the clip plane
@@ -1315,11 +1341,20 @@ bool UNavGen3DSubsystem::ProcessNavMesh3DVolume(NavMesh3DVolume& RefVolume, bool
 	struct FTraceHit
 	{
 		int32 AxisIndex;
+		bool bFromMin;
 		FVector Point;
 		// Surface normal, oriented back toward the side the trace started from
 		FVector Normal;
 	};
 	TArray<FTraceHit, TInlineAllocator<6>> TraceHits;
+
+	// Sides whose trace started inside geometry, so something touches that face
+	struct FPenetratingSide
+	{
+		int32 AxisIndex;
+		bool bFromMin;
+	};
+	TArray<FPenetratingSide, TInlineAllocator<6>> PenetratingSides;
 
 	auto CheckTrace = [&](EAxis::Type Axis, bool bFromMin)
 	{
@@ -1332,8 +1367,16 @@ bool UNavGen3DSubsystem::ProcessNavMesh3DVolume(NavMesh3DVolume& RefVolume, bool
 			default: break;
 		}
 
-		FVector TraceFirst  = bFromMin ? RefVolume.Bounds.Min : RefVolume.Bounds.Max;
-		FVector TraceSecond = bFromMin ? RefVolume.Bounds.Max : RefVolume.Bounds.Min;
+		// Traced on the volume inset slightly on every side, so geometry merely touching a face
+		// (common, since remainders are cut exactly at impact points) neither starts the trace
+		// inside geometry nor stops it
+		FBox TraceBounds = RefVolume.Bounds.ExpandBy(-NavGen3DClip::TraceInset);
+		if (!TraceBounds.IsValid || TraceBounds.Min.X >= TraceBounds.Max.X || TraceBounds.Min.Y >= TraceBounds.Max.Y || TraceBounds.Min.Z >= TraceBounds.Max.Z)
+		{
+			TraceBounds = RefVolume.Bounds;
+		}
+		FVector TraceFirst  = bFromMin ? TraceBounds.Min : TraceBounds.Max;
+		FVector TraceSecond = bFromMin ? TraceBounds.Max : TraceBounds.Min;
 
 		bool bStartPenetrating = false;
 		const bool bFoundHit = PlaneTrace(TraceFirst, TraceSecond, Axis, ImpactPoint, bStartPenetrating, &ImpactNormal);
@@ -1357,12 +1400,13 @@ bool UNavGen3DSubsystem::ProcessNavMesh3DVolume(NavMesh3DVolume& RefVolume, bool
 			{
 				OrientedNormal = -OrientedNormal;
 			}
-			TraceHits.Add({ HitAxisIndex, ImpactPoint, OrientedNormal });
+			TraceHits.Add({ HitAxisIndex, bFromMin, ImpactPoint, OrientedNormal });
 		}
 
 		if (bStartPenetrating)
 		{
 			++StartPenetratingCount;
+			PenetratingSides.Add({ (int32)Axis - (int32)EAxis::X, bFromMin });
 		}
 
 		if (DebugLevel >= 2 && World)
@@ -1521,12 +1565,24 @@ bool UNavGen3DSubsystem::ProcessNavMesh3DVolume(NavMesh3DVolume& RefVolume, bool
 					AddLogMessage(ENavGen3DLogCategory::Info, ActorName, TEXT("  No corner hit found on the clip plane"));
 				}
 			}
+			bool bFellBackToSlab = false;
+
+			// Corner: where the clipping surface ends inside the volume. The processing volume is split
+			// there with an axis aligned plane; the clipped solution volume takes the side the surface
+			// is on, and the other side is queued for processing. The corner is either a trace that
+			// stopped on the tip, or, when no trace reached the tip (its side started inside geometry),
+			// the line where the clipping surface meets another angled surface it forms a convex
+			// corner with.
+			const float PlaneTolerance = NavGen3DClip::CornerPlaneTolerance;
+			bool bHasCorner = false;
+			FVector CornerPoint = FVector::ZeroVector;
+			int32 CornerAxis = INDEX_NONE;
+
 			if (CornerHit)
 			{
 				// The side to move is across an axis other than the corner trace's own, the one along
 				// which the surface's impact is furthest from the corner
-				int32 CornerAxis = INDEX_NONE;
-				float BestOffset = NavGen3DClip::CornerPlaneTolerance;
+				float BestOffset = PlaneTolerance;
 				for (int32 Axis = 0; Axis < 3; ++Axis)
 				{
 					if (Axis == CornerHit->AxisIndex) continue;
@@ -1539,40 +1595,285 @@ bool UNavGen3DSubsystem::ProcessNavMesh3DVolume(NavMesh3DVolume& RefVolume, bool
 				}
 				if (CornerAxis != INDEX_NONE)
 				{
-					// This splits the processing volume at the corner: the clipped solution volume
-					// takes one side, and the other side is queued for processing
-					const float CornerValue = CornerHit->Point[CornerAxis];
-					Remainder = CreateNavMeshVolume();
-					Remainder->Bounds = RefVolume.Bounds;
-					Remainder->ParentBoundsVolume = RefVolume.ParentBoundsVolume;
-					RemainderAxis = CornerAxis;
+					bHasCorner = true;
+					CornerPoint = CornerHit->Point;
+				}
+			}
+			else
+			{
+				// The other surface of a convex corner: an angled hit at a clear angle to the clipping
+				// surface, with each impact on the solid side of the other's surface
+				const FTraceHit* OtherFace = nullptr;
+				float BestDot = NavGen3DClip::CornerMaxNormalDot;
+				for (const FTraceHit& Hit : TraceHits)
+				{
+					if (FVector::Dist(Hit.Point, FarthestImpactPoint) <= PlaneTolerance) continue;
+					if (Hit.Normal.IsNearlyZero() || NavGen3DClip::IsAxisAlignedNormal(Hit.Normal)) continue;
+					const float Dot = Hit.Normal | ClearDirection;
+					if (Dot >= BestDot) continue;
+					if (((Hit.Point - FarthestImpactPoint) | ClearDirection) > PlaneTolerance) continue;
+					if (((FarthestImpactPoint - Hit.Point) | Hit.Normal) > PlaneTolerance) continue;
+					BestDot = Dot;
+					OtherFace = &Hit;
+				}
 
-					if (FarthestImpactPoint[CornerAxis] < CornerValue)
+				FVector Intersection;
+				if (OtherFace && NavGen3DClip::GetPlaneIntersectionPoint(FarthestImpactPoint, ClearDirection, OtherFace->Point, OtherFace->Normal, BoundsCenter, Intersection))
+				{
+					// Split across the axis that best separates the two impacts onto opposite sides of the corner
+					float BestSeparation = PlaneTolerance;
+					for (int32 Axis = 0; Axis < 3; ++Axis)
 					{
-						SolutionVolume.Bounds.Max[CornerAxis] = FMath::Min(SolutionVolume.Bounds.Max[CornerAxis], CornerValue);
-						ClipRegion.Max[CornerAxis] = SolutionVolume.Bounds.Max[CornerAxis];
-						Remainder->Bounds.Min[CornerAxis] = CornerValue;
+						const float OffsetA = FarthestImpactPoint[Axis] - Intersection[Axis];
+						const float OffsetB = OtherFace->Point[Axis] - Intersection[Axis];
+						if (OffsetA * OffsetB >= 0.0f) continue;
+						const float Separation = FMath::Min(FMath::Abs(OffsetA), FMath::Abs(OffsetB));
+						if (Separation > BestSeparation)
+						{
+							BestSeparation = Separation;
+							CornerAxis = Axis;
+						}
+					}
+					if (CornerAxis != INDEX_NONE &&
+						Intersection[CornerAxis] > RefVolume.Bounds.Min[CornerAxis] + Epsilon &&
+						Intersection[CornerAxis] < RefVolume.Bounds.Max[CornerAxis] - Epsilon)
+					{
+						bHasCorner = true;
+						CornerPoint = Intersection;
 					}
 					else
 					{
-						SolutionVolume.Bounds.Min[CornerAxis] = FMath::Max(SolutionVolume.Bounds.Min[CornerAxis], CornerValue);
-						ClipRegion.Min[CornerAxis] = SolutionVolume.Bounds.Min[CornerAxis];
-						Remainder->Bounds.Max[CornerAxis] = CornerValue;
-					}
-					if (InDrawDebug)
-					{
-						AddLogMessage(ENavGen3DLogCategory::Info, ActorName,
-							FString::Printf(TEXT("Aligned volume side on axis %d to corner %s"), CornerAxis, *FVectorToString(CornerHit->Point)));
+						CornerAxis = INDEX_NONE;
 					}
 				}
 			}
 
-			bHasValidVolume = NavGen3DClip::FitBoundsToClip(SolutionVolume);
+			if (bHasCorner)
+			{
+				const float CornerValue = CornerPoint[CornerAxis];
+				Remainder = CreateNavMeshVolume();
+				Remainder->Bounds = RefVolume.Bounds;
+				Remainder->ParentBoundsVolume = RefVolume.ParentBoundsVolume;
+				RemainderAxis = CornerAxis;
+
+				if (FarthestImpactPoint[CornerAxis] < CornerValue)
+				{
+					SolutionVolume.Bounds.Max[CornerAxis] = FMath::Min(SolutionVolume.Bounds.Max[CornerAxis], CornerValue);
+					ClipRegion.Max[CornerAxis] = SolutionVolume.Bounds.Max[CornerAxis];
+					Remainder->Bounds.Min[CornerAxis] = CornerValue;
+				}
+				else
+				{
+					SolutionVolume.Bounds.Min[CornerAxis] = FMath::Max(SolutionVolume.Bounds.Min[CornerAxis], CornerValue);
+					ClipRegion.Min[CornerAxis] = SolutionVolume.Bounds.Min[CornerAxis];
+					Remainder->Bounds.Max[CornerAxis] = CornerValue;
+				}
+				if (InDrawDebug)
+				{
+					AddLogMessage(ENavGen3DLogCategory::Info, ActorName,
+						FString::Printf(TEXT("Split at %s corner %s on axis %d"),
+							CornerHit ? TEXT("tip") : TEXT("surface"), *FVectorToString(CornerPoint), CornerAxis));
+				}
+			}
+
+			// When the clipped volume would contain geometry the clip doesn't exclude, fall back to the
+			// slab the deciding trace proved clear, and queue the rest of the processing volume so it
+			// is split cleanly in later iterations
+			auto FallBackToTracedSlab = [&](const FString& InReason)
+			{
+				bFellBackToSlab = true;
+
+				// The corner split's remainder is replaced by the one below
+				delete Remainder;
+				Remainder = CreateNavMeshVolume();
+				Remainder->Bounds = RefVolume.Bounds;
+				Remainder->ParentBoundsVolume = RefVolume.ParentBoundsVolume;
+				RemainderAxis = AxisIndex;
+
+				const float SplitValue = FarthestImpactPoint[AxisIndex];
+				const float HalfEpsilon = Epsilon * 0.5f;
+				SolutionVolume.Bounds = RefVolume.Bounds;
+				SolutionVolume.ClipPoint = FVector::ZeroVector;
+				SolutionVolume.ClipVector = FVector::ZeroVector;
+				if (bFarthestFromMin)
+				{
+					SolutionVolume.Bounds.Max[AxisIndex] = SplitValue - HalfEpsilon;
+					Remainder->Bounds.Min[AxisIndex] = SplitValue;
+				}
+				else
+				{
+					SolutionVolume.Bounds.Min[AxisIndex] = SplitValue + HalfEpsilon;
+					Remainder->Bounds.Max[AxisIndex] = SplitValue;
+				}
+				bHasValidVolume = true;
+
+				if (InDrawDebug)
+				{
+					AddLogMessage(ENavGen3DLogCategory::Info, ActorName,
+						FString::Printf(TEXT("%s; using the traced slab instead"), *InReason));
+				}
+			};
+
+			// Other geometry hit by a trace: an impact on the valid side of the clipping surface,
+			// inside the solution volume
+			const FTraceHit* IntrudingHit = nullptr;
+			for (const FTraceHit& Hit : TraceHits)
+			{
+				if (&Hit == CornerHit) continue;
+				if (FVector::Dist(Hit.Point, FarthestImpactPoint) <= PlaneTolerance) continue;
+				if (((Hit.Point - FarthestImpactPoint) | ClearDirection) <= PlaneTolerance) continue;
+				if (!SolutionVolume.Bounds.IsInsideOrOn(Hit.Point)) continue;
+				IntrudingHit = &Hit;
+				break;
+			}
+
+			if (IntrudingHit)
+			{
+				FallBackToTracedSlab(FString::Printf(TEXT("Trace on axis %d hit other geometry at %s on the valid side"),
+					IntrudingHit->AxisIndex, *FVectorToString(IntrudingHit->Point)));
+			}
+			else
+			{
+				bHasValidVolume = NavGen3DClip::FitBoundsToClip(SolutionVolume);
+
+				// Other geometry no trace could see: a side whose trace started inside geometry has
+				// something touching that face, with no impact reported. Sweep in reverse, from the
+				// solution volume's opposite face toward that side, over only the part of the
+				// cross-section on the valid side of the clip, so the sweep passes beside the clipping
+				// surface. Its first hit is the near surface of that geometry; the solution volume is
+				// limited there, and what's cut off goes to the remainder slabs below.
+				auto LimitByReverseSweep = [&](const FPenetratingSide& InSide)
+				{
+					const int32 Axis = InSide.AxisIndex;
+					const int32 AxisU = (Axis + 1) % 3;
+					const int32 AxisV = (Axis + 2) % 3;
+					FBox& Bounds = SolutionVolume.Bounds;
+
+					// Only while the solution volume still reaches that side of the processing volume
+					const float SideValue = InSide.bFromMin ? Bounds.Min[Axis] : Bounds.Max[Axis];
+					const float RefSideValue = InSide.bFromMin ? RefVolume.Bounds.Min[Axis] : RefVolume.Bounds.Max[Axis];
+					if (!FMath::IsNearlyEqual(SideValue, RefSideValue, Epsilon)) return;
+					const float StartValue = InSide.bFromMin ? Bounds.Max[Axis] : Bounds.Min[Axis];
+
+					// Cross-section, cut back on one face axis until it is on the valid side at both ends
+					// of the sweep. Validity is linear along the sweep, so it then holds throughout.
+					float MinU = Bounds.Min[AxisU], MaxU = Bounds.Max[AxisU];
+					float MinV = Bounds.Min[AxisV], MaxV = Bounds.Max[AxisV];
+					if (SolutionVolume.IsClipped())
+					{
+						const FVector& ClipPoint = SolutionVolume.ClipPoint;
+						const FVector& ClipVec = SolutionVolume.ClipVector;
+						// Cut across the face axis the clip plane's trace on the face is most perpendicular to
+						const bool bCutV = FMath::Abs(ClipVec[AxisV]) >= FMath::Abs(ClipVec[AxisU]);
+						const int32 CutAxis = bCutV ? AxisV : AxisU;
+						const int32 SpanAxis = bCutV ? AxisU : AxisV;
+						float& CutMin = bCutV ? MinV : MinU;
+						float& CutMax = bCutV ? MaxV : MaxU;
+						const float SpanMin = bCutV ? MinU : MinV;
+						const float SpanMax = bCutV ? MaxU : MaxV;
+
+						for (const float PlaneValue : { StartValue, SideValue })
+						{
+							// Valid where Dot(P - ClipPoint, ClipVec) <= -PlaneTolerance. Take the worst case
+							// across the span axis, then solve for the cut axis.
+							const float Fixed = ClipVec[Axis] * (PlaneValue - ClipPoint[Axis])
+								+ FMath::Max(ClipVec[SpanAxis] * (SpanMin - ClipPoint[SpanAxis]), ClipVec[SpanAxis] * (SpanMax - ClipPoint[SpanAxis]));
+							if (FMath::Abs(ClipVec[CutAxis]) < KINDA_SMALL_NUMBER)
+							{
+								// The clip plane is parallel to the cut axis: the whole face is valid or none is
+								if (Fixed > -PlaneTolerance)
+								{
+									CutMax = CutMin;
+								}
+								continue;
+							}
+							const float Limit = ClipPoint[CutAxis] + (-PlaneTolerance - Fixed) / ClipVec[CutAxis];
+							if (ClipVec[CutAxis] > 0.0f)
+							{
+								CutMax = FMath::Min(CutMax, Limit);
+							}
+							else
+							{
+								CutMin = FMath::Max(CutMin, Limit);
+							}
+						}
+					}
+					if (MaxU - MinU <= PlaneTolerance * 2.0f || MaxV - MinV <= PlaneTolerance * 2.0f)
+					{
+						if (InDrawDebug)
+						{
+							AddLogMessage(ENavGen3DLogCategory::Info, ActorName,
+								FString::Printf(TEXT("Reverse sweep toward axis %d (%s) skipped: no cross-section clear of the clip"),
+									Axis, InSide.bFromMin ? TEXT("min") : TEXT("max")));
+						}
+						return;
+					}
+
+					FVector SweepFirst, SweepSecond;
+					SweepFirst[Axis] = StartValue;
+					SweepSecond[Axis] = SideValue;
+					SweepFirst[AxisU] = MinU + PlaneTolerance;
+					SweepSecond[AxisU] = MaxU - PlaneTolerance;
+					SweepFirst[AxisV] = MinV + PlaneTolerance;
+					SweepSecond[AxisV] = MaxV - PlaneTolerance;
+
+					FVector ReverseImpact;
+					bool bReverseStartPenetrating = false;
+					const bool bReverseHit = PlaneTrace(SweepFirst, SweepSecond, (EAxis::Type)((int32)EAxis::X + Axis), ReverseImpact, bReverseStartPenetrating);
+					const float PlaneDist = bReverseHit ? (ReverseImpact - FarthestImpactPoint) | ClearDirection : 0.0f;
+
+					FString Outcome;
+					if (bReverseHit && (!SolutionVolume.IsClipped() || PlaneDist > PlaneTolerance))
+					{
+						const float HalfEpsilon = Epsilon * 0.5f;
+						if (InSide.bFromMin)
+						{
+							Bounds.Min[Axis] = FMath::Max(Bounds.Min[Axis], ReverseImpact[Axis] + HalfEpsilon);
+						}
+						else
+						{
+							Bounds.Max[Axis] = FMath::Min(Bounds.Max[Axis], ReverseImpact[Axis] - HalfEpsilon);
+						}
+						bHasValidVolume = NavGen3DClip::FitBoundsToClip(SolutionVolume);
+						Outcome = FString::Printf(TEXT("hit geometry at %s, limited the volume there"), *FVectorToString(ReverseImpact));
+					}
+					else if (bReverseHit)
+					{
+						Outcome = FString::Printf(TEXT("hit the clipping surface at %s (plane dist %.2f)"), *FVectorToString(ReverseImpact), PlaneDist);
+					}
+					else if (bReverseStartPenetrating)
+					{
+						Outcome = TEXT("starts inside geometry");
+					}
+					else
+					{
+						Outcome = TEXT("no hit, clear");
+					}
+
+					if (InDrawDebug)
+					{
+						AddLogMessage(ENavGen3DLogCategory::Info, ActorName,
+							FString::Printf(TEXT("Reverse sweep toward axis %d (%s): %s"),
+								Axis, InSide.bFromMin ? TEXT("min") : TEXT("max"), *Outcome));
+						if (World)
+						{
+							const FBox SweepBox(SweepFirst.ComponentMin(SweepSecond), SweepFirst.ComponentMax(SweepSecond));
+							DrawDebugBox(World, SweepBox.GetCenter(), SweepBox.GetExtent(), FColor::Cyan, false, DebugDrawTime, 0, 2.0f);
+						}
+					}
+				};
+
+				for (const FPenetratingSide& Side : PenetratingSides)
+				{
+					if (!bHasValidVolume) break;
+					LimitByReverseSweep(Side);
+				}
+			}
 
 			// Fitting to the clip shrinks the solution bounds to the clear side. Whatever is left of
 			// the clip region outside those bounds is queued for processing as up to six slabs,
 			// peeled one axis at a time so they don't overlap.
-			if (bHasValidVolume)
+			if (bHasValidVolume && !bFellBackToSlab)
 			{
 				const FBox& Inner = SolutionVolume.Bounds;
 				FBox Outer = ClipRegion;
@@ -1632,11 +1933,103 @@ bool UNavGen3DSubsystem::ProcessNavMesh3DVolume(NavMesh3DVolume& RefVolume, bool
 	}
 	else
 	{
-		// TODO: handle volumes whose traces start inside geometry. Until then they are dropped.
-		if (InDrawDebug)
+		// Every trace that found anything started inside geometry, so there is no impact to split
+		// on. For each such side, step inward from the face testing a thin slice across the whole
+		// cross-section, to find where the geometry touching that face ends: the first clear slice.
+		// Split the volume at the shallowest one and queue both parts. The part beyond the split
+		// now has a clear face on that side, so its trace finds real impacts on the next pass.
+		const FVector Size = RefVolume.Bounds.GetSize();
+		const float PlaneTolerance = NavGen3DClip::CornerPlaneTolerance;
+
+		auto FindClearSlice = [&](const FPenetratingSide& InSide, float& OutSliceValue) -> bool
 		{
-			AddLogMessage(ENavGen3DLogCategory::Warning, ActorName,
-				FString::Printf(TEXT("Penetrating volume not yet handled, dropped Extent:%s"), *RefVolume.Bounds.GetExtent().ToString()));
+			if (!World) return false;
+			const int32 Axis = InSide.AxisIndex;
+			const float Step = FMath::Max(Epsilon, Size[Axis] / NavGen3DClip::ClearSliceSteps);
+			const float FaceValue = InSide.bFromMin ? RefVolume.Bounds.Min[Axis] : RefVolume.Bounds.Max[Axis];
+			const float Direction = InSide.bFromMin ? 1.0f : -1.0f;
+
+			FVector SliceHalfExtent = (Size * 0.5f - FVector(PlaneTolerance)).ComponentMax(FVector(KINDA_SMALL_NUMBER));
+			SliceHalfExtent[Axis] = FMath::Min(PlaneTolerance * 0.5f, Step * 0.25f);
+			const FCollisionShape SliceShape = FCollisionShape::MakeBox(SliceHalfExtent);
+
+			FVector SliceCenter = RefVolume.Bounds.GetCenter();
+			for (float Depth = Step; Depth < Size[Axis] - Step * 0.5f; Depth += Step)
+			{
+				SliceCenter[Axis] = FaceValue + Direction * Depth;
+				// Blocking only, matching what PlaneTrace's sweeps stop on
+				if (!World->OverlapBlockingTestByChannel(SliceCenter, FQuat::Identity, ECC_WorldStatic, SliceShape))
+				{
+					OutSliceValue = SliceCenter[Axis];
+					return true;
+				}
+			}
+			return false;
+		};
+
+		const FPenetratingSide* BestSide = nullptr;
+		float BestSliceValue = 0.0f;
+		float BestDepth = FLT_MAX;
+		for (const FPenetratingSide& Side : PenetratingSides)
+		{
+			float SliceValue;
+			if (!FindClearSlice(Side, SliceValue)) continue;
+			const float FaceValue = Side.bFromMin ? RefVolume.Bounds.Min[Side.AxisIndex] : RefVolume.Bounds.Max[Side.AxisIndex];
+			const float Depth = FMath::Abs(SliceValue - FaceValue);
+			if (Depth < BestDepth)
+			{
+				BestDepth = Depth;
+				BestSide = &Side;
+				BestSliceValue = SliceValue;
+			}
+		}
+
+		if (BestSide)
+		{
+			auto QueuePart = [&](const FBox& InBounds)
+			{
+				const FVector PartSize = InBounds.GetSize();
+				if (PartSize.X <= Epsilon || PartSize.Y <= Epsilon || PartSize.Z <= Epsilon) return;
+				if (FMath::Max3(PartSize.X, PartSize.Y, PartSize.Z) < GetProcessMinVolumeSize(InBounds, RefVolume.ParentBoundsVolume)) return;
+				NavMeshVolumeBase* Part = CreateNavMeshVolume();
+				Part->Bounds = InBounds;
+				Part->ParentBoundsVolume = RefVolume.ParentBoundsVolume;
+				ProcessVolumesList.Add(Part);
+			};
+
+			const int32 Axis = BestSide->AxisIndex;
+			FBox LowPart = RefVolume.Bounds;
+			FBox HighPart = RefVolume.Bounds;
+			LowPart.Max[Axis] = BestSliceValue;
+			HighPart.Min[Axis] = BestSliceValue;
+			QueuePart(LowPart);
+			QueuePart(HighPart);
+
+			if (InDrawDebug)
+			{
+				AddLogMessage(ENavGen3DLogCategory::Info, ActorName,
+					FString::Printf(TEXT("All traces start inside geometry; side on axis %d (%s) clears at depth %.1f, split there"),
+						Axis, BestSide->bFromMin ? TEXT("min") : TEXT("max"), BestDepth));
+				if (World)
+				{
+					FVector PlaneExtent = RefVolume.Bounds.GetExtent();
+					PlaneExtent[Axis] = 0.0f;
+					FVector PlaneCenter = RefVolume.Bounds.GetCenter();
+					PlaneCenter[Axis] = BestSliceValue;
+					DrawDebugBox(World, PlaneCenter, PlaneExtent, FColor::Cyan, false, DebugDrawTime, 0, 3.0f);
+				}
+			}
+		}
+		else
+		{
+			// No clear slice on any side, e.g. geometry passing right through the volume: halve it
+			// along its longest axis so later passes can isolate the geometry
+			if (InDrawDebug)
+			{
+				AddLogMessage(ENavGen3DLogCategory::Info, ActorName,
+					FString::Printf(TEXT("All traces start inside geometry and no side clears, halving Extent:%s"), *RefVolume.Bounds.GetExtent().ToString()));
+			}
+			SplitAlongLongestAxis(RefVolume, InDrawDebug, ActorName);
 		}
 	}
 
@@ -2621,8 +3014,18 @@ bool UNavGen3DSubsystem::GenerateNavMesh3D(NavMeshVolumeBase* InVolume)
 		return false;
 	}
 
+	// Safety cap so runaway splitting can't hang the editor
+	const int32 MaxIterations = FMath::Max(GetDefault<UNavGen3DSettings>()->MaxVolumeCount, 1) * NavGen3DClip::MaxProcessIterationsPerVolume;
+	int32 Iterations = 0;
 	while (!ProcessVolumesList.IsEmpty())
 	{
+		if (++Iterations > MaxIterations)
+		{
+			AddLogMessage(ENavGen3DLogCategory::Warning, TEXT(""),
+				FString::Printf(TEXT("Generation stopped after %d iterations with %d volumes still queued"), MaxIterations, ProcessVolumesList.Num()));
+			break;
+		}
+
 		NavMeshVolumeBase* CurrentVolume = ProcessVolumesList[0];
 		ProcessVolumesList.RemoveAtSwap(0);
 		ProcessNavMeshVolume(*CurrentVolume);

@@ -59,7 +59,8 @@ struct FPathSearchSpace
 	void DebugDrawPath(float InDrawTime) const;
 };
 
-UCLASS()
+// Config properties are saved per user to Saved/Config/<Platform>Editor/EditorPerProjectUserSettings.ini
+UCLASS(Config = EditorPerProjectUserSettings)
 class NAVGEN3DPLUGIN_API UNavGen3DSubsystem : public UEngineSubsystem
 {
 	GENERATED_BODY()
@@ -147,13 +148,13 @@ public:
 	bool DrawConnectivity = false;
 
 	// Selects the volume type created during generation; changing it requires a reset
-	UPROPERTY()
-	bool AxisAligned = true;
+	UPROPERTY(Config)
+	bool AxisAligned = false;
 
 	// Smallest side length (uu) a solution volume may have on at least two axes. Below 0, the
 	// limit comes from the supported agents' padded collision radius instead.
-	UPROPERTY()
-	float MinSolutionVolumeSize = -1.0f;
+	UPROPERTY(Config)
+	float MinSolutionVolumeSize = 0.0f;
 
 	UPROPERTY()
 	bool PathSmoothingEnabled = true;
@@ -173,8 +174,8 @@ public:
 
 	bool bCameraLocationValidForAgent = false;
 
-	UPROPERTY()
-	float DebugDrawTime = 0.0f;
+	UPROPERTY(Config)
+	float DebugDrawTime = 30.0f;
 
 	UPROPERTY()
 	int32 DebugNavMeshAgentIndex = 0;

@@ -264,6 +264,7 @@ void SNavGen3DWindow::Construct(const FArguments& InArgs)
 								.MinValue(0.0f).MaxValue(120.0f)
 								.Value(this, &SNavGen3DWindow::GetDebugDrawTime)
 								.OnValueChanged(this, &SNavGen3DWindow::OnDebugDrawTimeChanged)
+								.OnMouseCaptureEnd(this, &SNavGen3DWindow::OnDebugDrawTimeCommitted)
 							]
 							+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(8.0f, 0.0f, 0.0f, 0.0f)
 							[ SNew(STextBlock).Text(this, &SNavGen3DWindow::GetDebugDrawTimeText).ColorAndOpacity(TextColor) ]
@@ -760,6 +761,15 @@ void SNavGen3DWindow::OnDebugDrawTimeChanged(float InNewValue)
 	}
 }
 
+void SNavGen3DWindow::OnDebugDrawTimeCommitted()
+{
+	// Saved once the drag ends, rather than for every value the slider reports while dragging
+	if (UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
+	{
+		Subsystem->SaveConfig();
+	}
+}
+
 FReply SNavGen3DWindow::OnClearDebugClicked()
 {
 	if (UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
@@ -1140,6 +1150,7 @@ void SNavGen3DWindow::OnAxisAlignedChanged(ECheckBoxState InNewState)
 	if (UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
 	{
 		Subsystem->AxisAligned = (InNewState == ECheckBoxState::Checked);
+		Subsystem->SaveConfig();
 		// Volumes of the previous type can't be mixed with the new one, so start over
 		Subsystem->InitializeNavMesh3D();
 	}
@@ -1170,7 +1181,13 @@ void SNavGen3DWindow::OnMinVolumeSizeChanged(float InNewValue)
 {
 	if (UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
 	{
-		Subsystem->MinSolutionVolumeSize = (float)FMath::RoundToInt(InNewValue);
+		const float NewSize = (float)FMath::RoundToInt(InNewValue);
+		if (NewSize != Subsystem->MinSolutionVolumeSize)
+		{
+			Subsystem->MinSolutionVolumeSize = NewSize;
+			// Only on change, since the slider reports every drag movement
+			Subsystem->SaveConfig();
+		}
 	}
 }
 
@@ -1179,6 +1196,10 @@ FReply SNavGen3DWindow::OnResetNavMesh3DClicked()
 	if (UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
 	{
 		Subsystem->InitializeNavMesh3D();
+		if (UWorld* World = Subsystem->FindWorld())
+		{
+			FlushPersistentDebugLines(World);
+		}
 	}
 	return FReply::Handled();
 }

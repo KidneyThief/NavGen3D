@@ -75,6 +75,7 @@ private:
 	float GetDebugDrawTime() const;
 	FText GetDebugDrawTimeText() const;
 	void OnDebugDrawTimeChanged(float InNewValue);
+	void OnDebugDrawTimeCommitted();
 
 	// Mover 3D Debug panel
 	FReply OnMoverResetClicked();
