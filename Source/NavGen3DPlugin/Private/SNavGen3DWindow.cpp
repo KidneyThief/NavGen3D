@@ -296,8 +296,7 @@ void SNavGen3DWindow::Construct(const FArguments& InArgs)
 							+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
 							[ SNew(STextBlock).Text(FText::FromString("Axis Aligned:  ")).ColorAndOpacity(TextColor) ]
 							+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
-							[ SNew(SCheckBox).IsChecked(this, &SNavGen3DWindow::GetAxisAlignedState).OnCheckStateChanged(this, &SNavGen3DWindow::OnAxisAlignedChanged).IsEnabled(this, &SNavGen3DWindow::IsNotPlayMode) ]
-						]
+							[ SNew(SCheckBox).IsChecked(this, &SNavGen3DWindow::GetAxisAlignedState).OnCheckStateChanged(this, &SNavGen3DWindow::OnAxisAlignedChanged).IsEnabled(this, &SNavGen3DWindow::IsNotPlayMode) ]						]
 
 						+ SVerticalBox::Slot()
 						.AutoHeight()
@@ -309,7 +308,7 @@ void SNavGen3DWindow::Construct(const FArguments& InArgs)
 							+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center).Padding(8.0f, 0.0f, 0.0f, 0.0f)
 							[
 								SNew(SSlider)
-								.MinValue(1.0f).MaxValue(100.0f).StepSize(1.0f)
+								.MinValue(0.0f).MaxValue(300.0f).StepSize(1.0f)
 								.Value(this, &SNavGen3DWindow::GetMinVolumeSize)
 								.OnValueChanged(this, &SNavGen3DWindow::OnMinVolumeSizeChanged)
 							]
@@ -1160,21 +1159,22 @@ float SNavGen3DWindow::GetMinVolumeSize() const
 {
 	if (const UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
 	{
-		return Subsystem->MinSolutionVolumeSize;
+		return Subsystem->MinVolumeSizeOverride;
 	}
-	return -1.0f;
+	return 0.0f;
 }
 
 FText SNavGen3DWindow::GetMinVolumeSizeText() const
 {
 	if (const UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
 	{
-		if (Subsystem->MinSolutionVolumeSize >= 0.0f)
+		if (Subsystem->MinVolumeSizeOverride > 0.0f)
 		{
-			return FText::FromString(FString::Printf(TEXT("%.0f"), Subsystem->MinSolutionVolumeSize));
+			return FText::FromString(FString::Printf(TEXT("%.0f"), Subsystem->MinVolumeSizeOverride));
 		}
 	}
-	return FText::FromString(TEXT("Agent"));
+	// 0 disables the override: each bounds volume's own MinVolumeSize is used
+	return FText::FromString(TEXT("Bounds"));
 }
 
 void SNavGen3DWindow::OnMinVolumeSizeChanged(float InNewValue)
@@ -1182,9 +1182,9 @@ void SNavGen3DWindow::OnMinVolumeSizeChanged(float InNewValue)
 	if (UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
 	{
 		const float NewSize = (float)FMath::RoundToInt(InNewValue);
-		if (NewSize != Subsystem->MinSolutionVolumeSize)
+		if (NewSize != Subsystem->MinVolumeSizeOverride)
 		{
-			Subsystem->MinSolutionVolumeSize = NewSize;
+			Subsystem->MinVolumeSizeOverride = NewSize;
 			// Only on change, since the slider reports every drag movement
 			Subsystem->SaveConfig();
 		}
@@ -1209,6 +1209,13 @@ FReply SNavGen3DWindow::OnProcessNextVolumeClicked()
 	if (UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
 	{
 		NavMeshVolumeBase* NextVolume = Subsystem->PopNextProcessingVolume();
+		// An empty queue only starts a new generation when there is no solution yet; otherwise
+		// processing is finished, and starting over would add duplicates of every volume
+		if (!NextVolume && Subsystem->GetSolutionVolumesCount() > 0)
+		{
+			Subsystem->AddLogMessage(ENavGen3DLogCategory::Info, TEXT(""), TEXT("Nothing left to process; press Reset to start over"));
+			return FReply::Handled();
+		}
 		if (!NextVolume)
 		{
 			const FVector CameraLocation = Subsystem->GetCameraLocation();
@@ -1241,6 +1248,13 @@ FReply SNavGen3DWindow::OnProcessCameraVolumeClicked()
 	if (UNavGen3DSubsystem* Subsystem = GEngine->GetEngineSubsystem<UNavGen3DSubsystem>())
 	{
 		const FVector CameraLocation = Subsystem->GetCameraLocation();
+
+		// As for Process Next Volume: with nothing queued and a solution present, processing is finished
+		if (Subsystem->GetProcessVolumesCount() == 0 && Subsystem->GetSolutionVolumesCount() > 0)
+		{
+			Subsystem->AddLogMessage(ENavGen3DLogCategory::Info, TEXT(""), TEXT("Nothing left to process; press Reset to start over"));
+			return FReply::Handled();
+		}
 
 		NavMeshVolumeBase* GenVolume = Subsystem->FindGenerationVolumeContainingLocation(CameraLocation, true);
 		if (!GenVolume)

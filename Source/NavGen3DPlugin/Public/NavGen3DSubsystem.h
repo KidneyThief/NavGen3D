@@ -81,10 +81,9 @@ public:
 	bool ValidateConnectionCollision(const FCollisionShape& InSphere, const FVector& InStart, const FVector& InEnd);
 	bool SweepAgentLOS(int32 InAgentIndex, const FVector& InFrom, const FVector& InTo, AActor* InIgnoreActor = nullptr) const;
 	bool AddNavMeshVolume(NavMeshVolumeBase& RefVolume);
-	// The size rule for solution volumes (see MinSolutionVolumeSize). Also used to drop queued
-	// volumes early: anything cut from a volume failing it can only be smaller, so fails it too.
-	// With MinSolutionVolumeSize >= 0, every side must reach it.
-	bool ValidateSolutionVolumeSize(const FBox& InBounds) const;
+	// The size rule for every volume: each side must reach GetProcessMinVolumeSize. Also used to drop
+	// queued volumes early: anything cut from a volume failing it can only be smaller, so fails it too.
+	bool ValidateSolutionVolumeSize(const FBox& InBounds, const TWeakObjectPtr<ANavGen3DBoundsVolume>& InParent) const;
 	void RemoveNavMeshVolume(uint64 InID);
 	bool ProcessNavMeshVolume(NavMeshVolumeBase& RefVolume, bool InDrawDebug = false);
 	bool ProcessNavMesh3DVolume(NavMesh3DVolume& RefVolume, bool InDrawDebug = false);
@@ -134,6 +133,8 @@ public:
 	NavMeshVolumeBase* PopNextProcessingVolume();
 	// Creates a new volume of the type used for generation; the caller owns the result
 	NavMeshVolumeBase* CreateNavMeshVolume() const;
+	// Minimum volume size: MinVolumeSizeOverride when set, otherwise the parent bounds volume's
+	// MinVolumeSize, lowered by any embedded bounds volume the bounds intersect
 	float GetProcessMinVolumeSize(const FBox& InBounds, const TWeakObjectPtr<ANavGen3DBoundsVolume>& InParent) const;
 	void DebugProcessSingleVolume(NavMeshVolumeBase& InVolume, bool bDrawDebug);
 	void DebugUndoLastProcess();
@@ -155,10 +156,10 @@ public:
 	UPROPERTY(Config)
 	bool AxisAligned = false;
 
-	// Smallest side length (uu) any solution or queued volume may have on every axis. Below 0, the
-	// limit comes from the supported agents' padded collision radius instead.
+	// Overrides the bounds volumes' MinVolumeSize (uu) when above 0; at 0 the bounds volume's own
+	// setting is used. See GetProcessMinVolumeSize.
 	UPROPERTY(Config)
-	float MinSolutionVolumeSize = 1.0f;
+	float MinVolumeSizeOverride = 0.0f;
 
 	UPROPERTY()
 	bool PathSmoothingEnabled = true;

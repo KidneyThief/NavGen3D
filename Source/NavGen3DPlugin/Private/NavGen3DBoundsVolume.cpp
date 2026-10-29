@@ -282,12 +282,17 @@ void ANavGen3DBoundsVolume::GenerateNavMesh3D()
 	{
 		Subsystem->InitializeNavMesh3D();
 		Subsystem->GenerateNavMesh3DFromBoundsVolume(this);
-		const int32 AgentCount = Subsystem->GetSupportedAgentCount();
-		for (int32 AgentIndex = 0; AgentIndex < AgentCount; ++AgentIndex)
+		// TODO: connections are only formed, and the result pruned (which relies on connections),
+		// for axis aligned volumes until non-axis aligned (clipped) volume generation is complete
+		if (Subsystem->AxisAligned)
 		{
-			Subsystem->GenerateNavMesh3DConnections(AgentIndex);
+			const int32 AgentCount = Subsystem->GetSupportedAgentCount();
+			for (int32 AgentIndex = 0; AgentIndex < AgentCount; ++AgentIndex)
+			{
+				Subsystem->GenerateNavMesh3DConnections(AgentIndex);
+			}
+			Subsystem->PruneNavMesh3D();
 		}
-		Subsystem->PruneNavMesh3D();
 #if WITH_EDITOR
 		SaveGeneratedAsset();
 #endif

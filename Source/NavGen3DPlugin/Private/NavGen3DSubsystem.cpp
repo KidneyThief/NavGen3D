@@ -31,6 +31,12 @@ namespace NavGen3DClip
 	constexpr int32 ClearSliceSteps = 64;
 	// Inset (uu) of the plane traces from each side of the volume, so touching geometry is ignored
 	constexpr float TraceInset = 1.0f;
+	// Upper limit of the panel's Min Volume Size override
+	constexpr float MaxVolumeSizeOverride = 300.0f;
+	// Grid resolution per face axis used to locate a corner tip touching a face, and the most
+	// overlapping cells a contact can cover and still count as a tip
+	constexpr int32 TipContactCellsPerAxis = 16;
+	constexpr int32 TipContactMaxCells = 4;
 	// Generation gives up after this many processed volumes per allowed solution volume
 	constexpr int32 MaxProcessIterationsPerVolume = 16;
 
@@ -216,8 +222,7 @@ namespace NavGen3DClip
 void UNavGen3DSubsystem::Initialize(FSubsystemCollectionBase& InCollection)
 {
 	Super::Initialize(InCollection);
-	// A value saved before the slider's minimum was raised to 1 would otherwise be kept
-	MinSolutionVolumeSize = FMath::Max(MinSolutionVolumeSize, 1.0f);
+	MinVolumeSizeOverride = FMath::Clamp(MinVolumeSizeOverride, 0.0f, NavGen3DClip::MaxVolumeSizeOverride);
 	FCoreDelegates::OnEndFrame.AddUObject(this, &UNavGen3DSubsystem::OnEndFrame);
 #if WITH_EDITOR
 	FEditorDelegates::MapChange.AddUObject(this, &UNavGen3DSubsystem::OnMapChanged);
@@ -592,33 +597,12 @@ uint64 UNavGen3DSubsystem::CalculateHash3D(const FVector& InVec) const
 	return (ComponentHash(InVec.X) << 32) | (ComponentHash(InVec.Y) << 16) | ComponentHash(InVec.Z);
 }
 
-bool UNavGen3DSubsystem::ValidateSolutionVolumeSize(const FBox& InBounds) const
+bool UNavGen3DSubsystem::ValidateSolutionVolumeSize(const FBox& InBounds, const TWeakObjectPtr<ANavGen3DBoundsVolume>& InParent) const
 {
-	if (MinSolutionVolumeSize >= 0.0f)
-	{
-		// Fixed limit from the panel replaces the agent size: every side must reach it
-		const FVector Size = InBounds.GetSize();
-		return Size.X >= MinSolutionVolumeSize && Size.Y >= MinSolutionVolumeSize && Size.Z >= MinSolutionVolumeSize;
-	}
-
-	const FVector Extent = InBounds.GetExtent();
-	for (int32 AgentIndex = 0; AgentIndex < GetSupportedAgentCount(); ++AgentIndex)
-	{
-		const float PaddedRadius = GetAgentCollisionRadius(AgentIndex, true);
-		int32 ExtentsMeetingRadius = 0;
-		for (int32 i = 0; i < 3; ++i)
-		{
-			if (Extent[i] >= PaddedRadius)
-			{
-				++ExtentsMeetingRadius;
-			}
-		}
-		if (ExtentsMeetingRadius >= 2)
-		{
-			return true;
-		}
-	}
-	return false;
+	// Every side must reach the minimum volume size
+	const float MinSize = GetProcessMinVolumeSize(InBounds, InParent);
+	const FVector Size = InBounds.GetSize();
+	return Size.X >= MinSize && Size.Y >= MinSize && Size.Z >= MinSize;
 }
 
 bool UNavGen3DSubsystem::AddNavMeshVolume(NavMeshVolumeBase& RefVolume)
@@ -635,7 +619,7 @@ bool UNavGen3DSubsystem::AddNavMeshVolume(NavMeshVolumeBase& RefVolume)
 		return false;
 	}
 
-	if (!ValidateSolutionVolumeSize(RefVolume.Bounds))
+	if (!ValidateSolutionVolumeSize(RefVolume.Bounds, RefVolume.ParentBoundsVolume))
 	{
 		return false;
 	}
@@ -927,6 +911,12 @@ void UNavGen3DSubsystem::AddGeneratedVolumeToSolution(const FNavGen3DGeneratedVo
 
 float UNavGen3DSubsystem::GetProcessMinVolumeSize(const FBox& InBounds, const TWeakObjectPtr<ANavGen3DBoundsVolume>& InParent) const
 {
+	// The panel override, when set, replaces the bounds volumes' own setting
+	if (MinVolumeSizeOverride > 0.0f)
+	{
+		return MinVolumeSizeOverride;
+	}
+
 	float MinVolumeSize = InParent.IsValid() ? InParent->MinVolumeSize : 0.0f;
 	for (const TWeakObjectPtr<ANavGen3DBoundsVolume>& WeakVol : BoundsVolumes)
 	{
@@ -968,16 +958,10 @@ void UNavGen3DSubsystem::SplitAlongLongestAxis(NavMeshVolumeBase& RefVolume, boo
 		default: break;
 	}
 
-	auto LongestDim = [](const NavMeshVolumeBase& V) -> float
-	{
-		const FVector S = V.Bounds.GetSize();
-		return FMath::Max3(S.X, S.Y, S.Z);
-	};
-
 	// Ownership of each half passes to ProcessVolumesList if queued, otherwise it is deleted
 	auto QueueOrDelete = [&](NavMeshVolumeBase* InHalf)
 	{
-		if (LongestDim(*InHalf) >= GetProcessMinVolumeSize(InHalf->Bounds, InHalf->ParentBoundsVolume) && ValidateSolutionVolumeSize(InHalf->Bounds))
+		if (ValidateSolutionVolumeSize(InHalf->Bounds, InHalf->ParentBoundsVolume))
 		{
 			ProcessVolumesList.Add(InHalf);
 			if (InDrawDebug)
@@ -988,6 +972,12 @@ void UNavGen3DSubsystem::SplitAlongLongestAxis(NavMeshVolumeBase& RefVolume, boo
 		}
 		else
 		{
+			if (InDrawDebug)
+			{
+				AddLogMessage(ENavGen3DLogCategory::Info, InActorName,
+					FString::Printf(TEXT("Dropped half Extent:%s: a side is below the min volume size %.1f"),
+						*InHalf->Bounds.GetExtent().ToString(), GetProcessMinVolumeSize(InHalf->Bounds, InHalf->ParentBoundsVolume)));
+			}
 			delete InHalf;
 		}
 	};
@@ -1312,7 +1302,7 @@ bool UNavGen3DSubsystem::ProcessNavMesh3DVolume(NavMesh3DVolume& RefVolume, bool
 	}
 
 	// Nothing cut from an undersized volume could be a valid solution volume
-	if (!ValidateSolutionVolumeSize(RefVolume.Bounds))
+	if (!ValidateSolutionVolumeSize(RefVolume.Bounds, RefVolume.ParentBoundsVolume))
 	{
 		return false;
 	}
@@ -1477,8 +1467,7 @@ bool UNavGen3DSubsystem::ProcessNavMesh3DVolume(NavMesh3DVolume& RefVolume, bool
 		{
 			const FVector Size = InBounds.GetSize();
 			if (Size.X <= Epsilon || Size.Y <= Epsilon || Size.Z <= Epsilon) return;
-			if (FMath::Max3(Size.X, Size.Y, Size.Z) < GetProcessMinVolumeSize(InBounds, RefVolume.ParentBoundsVolume)) return;
-			if (!ValidateSolutionVolumeSize(InBounds)) return;
+			if (!ValidateSolutionVolumeSize(InBounds, RefVolume.ParentBoundsVolume)) return;
 
 			NavMeshVolumeBase* Volume = CreateNavMeshVolume();
 			Volume->Bounds = InBounds;
@@ -1917,8 +1906,7 @@ bool UNavGen3DSubsystem::ProcessNavMesh3DVolume(NavMesh3DVolume& RefVolume, bool
 		{
 			const FVector RemainderSize = Remainder->Bounds.GetSize();
 			const bool bMadeProgress = RemainderSize[RemainderAxis] < RefVolume.Bounds.GetSize()[RemainderAxis];
-			if (bMadeProgress && FMath::Max3(RemainderSize.X, RemainderSize.Y, RemainderSize.Z) >= GetProcessMinVolumeSize(Remainder->Bounds, Remainder->ParentBoundsVolume)
-				&& ValidateSolutionVolumeSize(Remainder->Bounds))
+			if (bMadeProgress && ValidateSolutionVolumeSize(Remainder->Bounds, Remainder->ParentBoundsVolume))
 			{
 				ProcessVolumesList.Add(Remainder);
 				if (InDrawDebug)
@@ -1952,7 +1940,7 @@ bool UNavGen3DSubsystem::ProcessNavMesh3DVolume(NavMesh3DVolume& RefVolume, bool
 			if (!World) return false;
 			const int32 Axis = InSide.AxisIndex;
 			// No finer than the minimum volume size, since a thinner part would be invalid anyway
-			const float Step = FMath::Max3(Epsilon, MinSolutionVolumeSize, (float)(Size[Axis] / NavGen3DClip::ClearSliceSteps));
+			const float Step = FMath::Max3(Epsilon, GetProcessMinVolumeSize(RefVolume.Bounds, RefVolume.ParentBoundsVolume), (float)(Size[Axis] / NavGen3DClip::ClearSliceSteps));
 			const float FaceValue = InSide.bFromMin ? RefVolume.Bounds.Min[Axis] : RefVolume.Bounds.Max[Axis];
 			const float Direction = InSide.bFromMin ? 1.0f : -1.0f;
 
@@ -1991,20 +1979,67 @@ bool UNavGen3DSubsystem::ProcessNavMesh3DVolume(NavMesh3DVolume& RefVolume, bool
 			}
 		}
 
+		auto QueuePart = [&](const FBox& InBounds)
+		{
+			const FVector PartSize = InBounds.GetSize();
+			if (PartSize.X <= Epsilon || PartSize.Y <= Epsilon || PartSize.Z <= Epsilon) return;
+			if (!ValidateSolutionVolumeSize(InBounds, RefVolume.ParentBoundsVolume)) return;
+			NavMeshVolumeBase* Part = CreateNavMeshVolume();
+			Part->Bounds = InBounds;
+			Part->ParentBoundsVolume = RefVolume.ParentBoundsVolume;
+			ProcessVolumesList.Add(Part);
+		};
+
+		// Where a corner tip touches a face: the face is divided into a grid of thin cells just
+		// inside it, and the cells overlapping geometry are found. A tip shows up as a small
+		// cluster, and its centre is the contact point. A broad contact (more cells than a tip
+		// would cover) is not a tip.
+		auto FindTipContact = [&](const FPenetratingSide& InSide, FVector& OutPoint, int32& OutCellCount) -> bool
+		{
+			if (!World) return false;
+			const int32 Axis = InSide.AxisIndex;
+			const int32 AxisU = (Axis + 1) % 3;
+			const int32 AxisV = (Axis + 2) % 3;
+			const int32 Cells = NavGen3DClip::TipContactCellsPerAxis;
+			const float CellSizeU = (float)(Size[AxisU] / Cells);
+			const float CellSizeV = (float)(Size[AxisV] / Cells);
+			const float CellDepth = FMath::Min(NavGen3DClip::TraceInset * 2.0f, (float)Size[Axis]);
+			const float FaceValue = InSide.bFromMin ? RefVolume.Bounds.Min[Axis] : RefVolume.Bounds.Max[Axis];
+			const float Direction = InSide.bFromMin ? 1.0f : -1.0f;
+
+			FVector CellHalfExtent;
+			CellHalfExtent[Axis] = CellDepth * 0.5f;
+			CellHalfExtent[AxisU] = CellSizeU * 0.5f;
+			CellHalfExtent[AxisV] = CellSizeV * 0.5f;
+			const FCollisionShape CellShape = FCollisionShape::MakeBox(CellHalfExtent);
+
+			FVector ContactSum = FVector::ZeroVector;
+			OutCellCount = 0;
+			for (int32 U = 0; U < Cells; ++U)
+			{
+				for (int32 V = 0; V < Cells; ++V)
+				{
+					FVector CellCenter;
+					CellCenter[Axis] = FaceValue + Direction * CellDepth * 0.5f;
+					CellCenter[AxisU] = RefVolume.Bounds.Min[AxisU] + CellSizeU * (U + 0.5f);
+					CellCenter[AxisV] = RefVolume.Bounds.Min[AxisV] + CellSizeV * (V + 0.5f);
+					// Blocking only, matching what PlaneTrace's sweeps stop on
+					if (World->OverlapBlockingTestByChannel(CellCenter, FQuat::Identity, ECC_WorldStatic, CellShape))
+					{
+						ContactSum += CellCenter;
+						if (++OutCellCount > NavGen3DClip::TipContactMaxCells) return false;
+					}
+				}
+			}
+			if (OutCellCount == 0) return false;
+
+			OutPoint = ContactSum / OutCellCount;
+			OutPoint[Axis] = FaceValue;
+			return true;
+		};
+
 		if (BestSide)
 		{
-			auto QueuePart = [&](const FBox& InBounds)
-			{
-				const FVector PartSize = InBounds.GetSize();
-				if (PartSize.X <= Epsilon || PartSize.Y <= Epsilon || PartSize.Z <= Epsilon) return;
-				if (FMath::Max3(PartSize.X, PartSize.Y, PartSize.Z) < GetProcessMinVolumeSize(InBounds, RefVolume.ParentBoundsVolume)) return;
-				if (!ValidateSolutionVolumeSize(InBounds)) return;
-				NavMeshVolumeBase* Part = CreateNavMeshVolume();
-				Part->Bounds = InBounds;
-				Part->ParentBoundsVolume = RefVolume.ParentBoundsVolume;
-				ProcessVolumesList.Add(Part);
-			};
-
 			const int32 Axis = BestSide->AxisIndex;
 			FBox LowPart = RefVolume.Bounds;
 			FBox HighPart = RefVolume.Bounds;
@@ -2027,18 +2062,90 @@ bool UNavGen3DSubsystem::ProcessNavMesh3DVolume(NavMesh3DVolume& RefVolume, bool
 					DrawDebugBox(World, PlaneCenter, PlaneExtent, FColor::Cyan, false, DebugDrawTime, 0, 3.0f);
 				}
 			}
+			return false;
 		}
-		else
+
+		// No clear slice, typically an obstacle whose corners touch every face. Split through the
+		// tip on the face with the most tip-like contact, on that face's two axes. The tip then lies
+		// on the parts' shared edges, which the inset traces ignore, so their traces no longer start
+		// inside geometry and find the obstacle's surfaces on the next pass.
+		const FPenetratingSide* TipSide = nullptr;
+		FVector TipPoint = FVector::ZeroVector;
+		int32 TipCellCount = MAX_int32;
+		for (const FPenetratingSide& Side : PenetratingSides)
 		{
-			// No clear slice on any side, e.g. geometry passing right through the volume: halve it
-			// along its longest axis so later passes can isolate the geometry
+			FVector ContactPoint;
+			int32 CellCount = 0;
+			const bool bFoundTip = FindTipContact(Side, ContactPoint, CellCount);
 			if (InDrawDebug)
 			{
 				AddLogMessage(ENavGen3DLogCategory::Info, ActorName,
-					FString::Printf(TEXT("All traces start inside geometry and no side clears, halving Extent:%s"), *RefVolume.Bounds.GetExtent().ToString()));
+					FString::Printf(TEXT("  Tip search on axis %d (%s) face: %s"), Side.AxisIndex, Side.bFromMin ? TEXT("min") : TEXT("max"),
+						bFoundTip ? *FString::Printf(TEXT("tip at %s (%d cells)"), *FVectorToString(ContactPoint), CellCount)
+						: CellCount > 0 ? *FString::Printf(TEXT("broad contact, more than %d cells"), NavGen3DClip::TipContactMaxCells)
+						: TEXT("no contact found")));
 			}
-			SplitAlongLongestAxis(RefVolume, InDrawDebug, ActorName);
+			if (bFoundTip && CellCount < TipCellCount)
+			{
+				TipSide = &Side;
+				TipPoint = ContactPoint;
+				TipCellCount = CellCount;
+			}
 		}
+
+		if (TipSide)
+		{
+			// A split too close to a side would leave an invalid sliver, so that axis isn't split
+			const float Margin = FMath::Max(GetProcessMinVolumeSize(RefVolume.Bounds, RefVolume.ParentBoundsVolume), Epsilon);
+			TArray<FBox, TInlineAllocator<4>> Parts;
+			Parts.Add(RefVolume.Bounds);
+			for (const int32 SplitAxis : { (TipSide->AxisIndex + 1) % 3, (TipSide->AxisIndex + 2) % 3 })
+			{
+				const float SplitValue = TipPoint[SplitAxis];
+				if (SplitValue <= RefVolume.Bounds.Min[SplitAxis] + Margin || SplitValue >= RefVolume.Bounds.Max[SplitAxis] - Margin) continue;
+
+				TArray<FBox, TInlineAllocator<4>> SplitParts;
+				for (const FBox& Part : Parts)
+				{
+					FBox LowPart = Part;
+					FBox HighPart = Part;
+					LowPart.Max[SplitAxis] = SplitValue;
+					HighPart.Min[SplitAxis] = SplitValue;
+					SplitParts.Add(LowPart);
+					SplitParts.Add(HighPart);
+				}
+				Parts = SplitParts;
+			}
+
+			if (Parts.Num() > 1)
+			{
+				for (const FBox& Part : Parts)
+				{
+					QueuePart(Part);
+				}
+
+				if (InDrawDebug)
+				{
+					AddLogMessage(ENavGen3DLogCategory::Info, ActorName,
+						FString::Printf(TEXT("All traces start inside geometry; tip on axis %d (%s) face at %s (%d cells), split into %d parts"),
+							TipSide->AxisIndex, TipSide->bFromMin ? TEXT("min") : TEXT("max"), *FVectorToString(TipPoint), TipCellCount, Parts.Num()));
+					if (World)
+					{
+						DrawDebugSphere(World, TipPoint, 10.0f, 8, FColor::Cyan, false, DebugDrawTime, 0, 2.0f);
+					}
+				}
+				return false;
+			}
+		}
+
+		// No clear slice and no tip to split through, e.g. geometry passing right through the
+		// volume: halve it along its longest axis so later passes can isolate the geometry
+		if (InDrawDebug)
+		{
+			AddLogMessage(ENavGen3DLogCategory::Info, ActorName,
+				FString::Printf(TEXT("All traces start inside geometry and no side clears, halving Extent:%s"), *RefVolume.Bounds.GetExtent().ToString()));
+		}
+		SplitAlongLongestAxis(RefVolume, InDrawDebug, ActorName);
 	}
 
 	return false;
@@ -3525,7 +3632,14 @@ void UNavGen3DSubsystem::DebugDrawUpdate()
 
 		if (NavMeshVolumeBase* Volume = FindVolumeContainingLocation(CameraLocation))
 		{
-			DrawDebugBox(World, Volume->Bounds.GetCenter(), Volume->Bounds.GetExtent(), FColor::Green, false, DrawTime, 0, 5.0f);
+			if (NavGen3DClip::IsClippedVolume(*Volume))
+			{
+				NavGen3DClip::DrawClippedVolume(World, *Volume->AsNavMesh3DVolume(), DrawTime, 5.0f);
+			}
+			else
+			{
+				DrawDebugBox(World, Volume->Bounds.GetCenter(), Volume->Bounds.GetExtent(), FColor::Green, false, DrawTime, 0, 5.0f);
+			}
 
 			if (const TMap<uint64, TArray<FNavVolumeConnection>>* AgentConnections = NavVolumeConnectionMap.Find(DebugNavMeshAgentIndex))
 			{

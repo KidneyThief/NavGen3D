@@ -63,8 +63,7 @@ private:
 	FReply OnValidateCameraVolumeClicked();
 	FReply OnFindCameraVolumeConnectionsClicked();
 	ECheckBoxState GetAxisAlignedState() const;
-	void OnAxisAlignedChanged(ECheckBoxState InNewState);
-	float GetMinVolumeSize() const;
+	void OnAxisAlignedChanged(ECheckBoxState InNewState);	float GetMinVolumeSize() const;
 	FText GetMinVolumeSizeText() const;
 	void OnMinVolumeSizeChanged(float InNewValue);
 	FReply OnResetNavMesh3DClicked();
