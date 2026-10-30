@@ -6,6 +6,7 @@
 #include "NavMesh3DVolume.h"
 #include "SNavGen3DWindow.h"
 #include "Misc/CoreDelegates.h"
+#include "Misc/ScopedSlowTask.h"
 #include "EngineUtils.h"
 #include "DrawDebugHelpers.h"
 #include "GameFramework/PlayerController.h"
@@ -22,6 +23,9 @@ namespace NavGen3DClip
 	// Normals within this tolerance of a cardinal axis are treated as axis aligned
 	constexpr float AxisAlignedTolerance = 1.0e-3f;
 	constexpr float ClipArrowLength = 50.0f;
+	// Line thickness of solution volumes, and of the solution volume the camera is in
+	constexpr float SolutionVolumeThickness = 1.0f;
+	constexpr float CameraVolumeThickness = 3.0f;
 	// Distance (uu) within which an impact point counts as lying on a surface plane
 	constexpr float CornerPlaneTolerance = 1.0f;
 	// Two surfaces form a corner only if their normals differ by more than ~8 degrees
@@ -39,6 +43,11 @@ namespace NavGen3DClip
 	constexpr int32 TipContactMaxCells = 4;
 	// Generation gives up after this many processed volumes per allowed solution volume
 	constexpr int32 MaxProcessIterationsPerVolume = 16;
+	// Least amount (uu) a processed volume must shrink by, on some axis, for a pass that added no
+	// solution volume to count as progress (see the no-progress guard in ProcessNavMeshVolume)
+	constexpr float MinProcessProgress = 1.0f;
+	// Seconds generation must run before its progress dialog (with Cancel) appears
+	constexpr float ProgressDialogDelay = 0.5f;
 
 	bool IsAxisAlignedNormal(const FVector& InNormal)
 	{
@@ -158,9 +167,9 @@ namespace NavGen3DClip
 		return true;
 	}
 
-	// Only the parts of the box edges on the valid side of the clip plane are drawn, in green,
+	// Only the parts of the box edges on the valid side of the clip plane are drawn, in InEdgeColor,
 	// with the clip plane outlined in yellow and an arrow toward the clipped side
-	void DrawClippedVolume(const UWorld* InWorld, const NavMesh3DVolume& InVolume, float InDrawTime, float InThickness)
+	void DrawClippedVolume(const UWorld* InWorld, const NavMesh3DVolume& InVolume, float InDrawTime, float InThickness, const FColor& InEdgeColor = FColor::Green, uint8 InDepthPriority = SDPG_World)
 	{
 		FVector Corners[8];
 		GetBoxCorners(InVolume.Bounds, Corners);
@@ -176,12 +185,12 @@ namespace NavGen3DClip
 			{
 				if (bValidA)
 				{
-					DrawDebugLine(InWorld, A, B, FColor::Green, false, InDrawTime, 0, InThickness);
+					DrawDebugLine(InWorld, A, B, InEdgeColor, false, InDrawTime, InDepthPriority, InThickness);
 				}
 				return;
 			}
 			const FVector Mid = FMath::Lerp(A, B, SideA / (SideA - SideB));
-			DrawDebugLine(InWorld, bValidA ? A : B, Mid, FColor::Green, false, InDrawTime, 0, InThickness);
+			DrawDebugLine(InWorld, bValidA ? A : B, Mid, InEdgeColor, false, InDrawTime, InDepthPriority, InThickness);
 			PlanePoints.Add(Mid);
 		});
 
@@ -209,13 +218,13 @@ namespace NavGen3DClip
 
 			for (int32 i = 0; i < PlanePoints.Num(); ++i)
 			{
-				DrawDebugLine(InWorld, PlanePoints[i], PlanePoints[(i + 1) % PlanePoints.Num()], FColor::Yellow, false, InDrawTime, 0, InThickness);
+				DrawDebugLine(InWorld, PlanePoints[i], PlanePoints[(i + 1) % PlanePoints.Num()], FColor::Yellow, false, InDrawTime, InDepthPriority, InThickness);
 			}
 		}
 
 		// Clip vector from the clip point, pointing toward the clipped side
 		DrawDebugDirectionalArrow(InWorld, InVolume.ClipPoint, InVolume.ClipPoint + Normal * ClipArrowLength,
-			ClipArrowLength * 0.25f, FColor::Purple, false, InDrawTime, 0, InThickness);
+			ClipArrowLength * 0.25f, FColor::Purple, false, InDrawTime, InDepthPriority, InThickness);
 	}
 }
 
@@ -811,11 +820,11 @@ bool UNavGen3DSubsystem::AddNavMeshVolume(NavMeshVolumeBase& RefVolume)
 		{
 			if (NavGen3DClip::IsClippedVolume(*Stored))
 			{
-				NavGen3DClip::DrawClippedVolume(World, *Stored->AsNavMesh3DVolume(), DebugDrawTime, 5.0f);
+				NavGen3DClip::DrawClippedVolume(World, *Stored->AsNavMesh3DVolume(), DebugDrawTime, NavGen3DClip::SolutionVolumeThickness);
 			}
 			else
 			{
-				DrawDebugBox(World, Center, Stored->Bounds.GetExtent(), FColor::Green, false, DebugDrawTime, 0, 5.0f);
+				DrawDebugBox(World, Center, Stored->Bounds.GetExtent(), FColor::Green, false, DebugDrawTime, 0, NavGen3DClip::SolutionVolumeThickness);
 			}
 		}
 	}
@@ -1109,7 +1118,66 @@ bool UNavGen3DSubsystem::ProcessNavMeshVolume(NavMeshVolumeBase& RefVolume, bool
 {
 	if (NavMesh3DVolume* Volume3D = RefVolume.AsNavMesh3DVolume())
 	{
-		return ProcessNavMesh3DVolume(*Volume3D, InDrawDebug);
+		const int32 SolutionCountBefore = NavMeshSolutionMap.Num();
+		const int32 QueuedCountBefore = ProcessVolumesList.Num();
+		const bool bResult = ProcessNavMesh3DVolume(*Volume3D, InDrawDebug);
+
+		// No-progress guard: a pass that added no solution volume, and only queued volumes barely
+		// smaller than the one it processed, would repeat on almost the same volume indefinitely
+		// (e.g. a rejected sliver of a solution peeled off each pass). Discard what it queued and
+		// halve the volume instead, which always makes real progress.
+		if (NavMeshSolutionMap.Num() == SolutionCountBefore && ProcessVolumesList.Num() > QueuedCountBefore)
+		{
+			// A fixed small amount, not the min volume size: peeling off a slab thinner than the min
+			// volume size (rejected as a solution) is still real progress for the remainder
+			const float MinProgress = NavGen3DClip::MinProcessProgress;
+			const FVector RefSize = RefVolume.Bounds.GetSize();
+			bool bStalled = true;
+			for (int32 i = QueuedCountBefore; i < ProcessVolumesList.Num() && bStalled; ++i)
+			{
+				const FVector QueuedSize = ProcessVolumesList[i]->Bounds.GetSize();
+				for (int32 Axis = 0; Axis < 3; ++Axis)
+				{
+					if (RefSize[Axis] - QueuedSize[Axis] >= MinProgress)
+					{
+						bStalled = false;
+						break;
+					}
+				}
+			}
+
+			if (bStalled)
+			{
+				// Always reported, since this should never happen: it names the branch to fix
+				const int32 QueuedCount = ProcessVolumesList.Num() - QueuedCountBefore;
+				FBox LargestQueued = ProcessVolumesList[QueuedCountBefore]->Bounds;
+				for (int32 i = QueuedCountBefore; i < ProcessVolumesList.Num(); ++i)
+				{
+					const FBox& Queued = ProcessVolumesList[i]->Bounds;
+					const FVector QueuedSize = Queued.GetSize();
+					const FVector LargestSize = LargestQueued.GetSize();
+					if (QueuedSize.X * QueuedSize.Y * QueuedSize.Z > LargestSize.X * LargestSize.Y * LargestSize.Z)
+					{
+						LargestQueued = Queued;
+					}
+				}
+
+				const FString ActorName = RefVolume.ParentBoundsVolume.IsValid() ? RefVolume.ParentBoundsVolume->GetActorLabel() : TEXT("<unknown>");
+				AddLogMessage(ENavGen3DLogCategory::Warning, ActorName,
+					FString::Printf(TEXT("No progress after '%s': Min:%s Max:%s queued %d volume(s) within %.1f of it, largest Min:%s Max:%s; halving instead"),
+						LastProcessBranch, *FVectorToString(RefVolume.Bounds.Min), *FVectorToString(RefVolume.Bounds.Max), QueuedCount, MinProgress,
+						*FVectorToString(LargestQueued.Min), *FVectorToString(LargestQueued.Max)));
+
+				for (int32 i = QueuedCountBefore; i < ProcessVolumesList.Num(); ++i)
+				{
+					delete ProcessVolumesList[i];
+				}
+				ProcessVolumesList.SetNum(QueuedCountBefore);
+
+				SplitAlongLongestAxis(RefVolume, InDrawDebug, ActorName);
+			}
+		}
+		return bResult;
 	}
 
 	{
@@ -1293,6 +1361,7 @@ bool UNavGen3DSubsystem::ProcessNavMeshVolume(NavMeshVolumeBase& RefVolume, bool
 
 bool UNavGen3DSubsystem::ProcessNavMesh3DVolume(NavMesh3DVolume& RefVolume, bool InDrawDebug)
 {
+	LastProcessBranch = TEXT("none");
 	{
 		const FVector Size = RefVolume.Bounds.GetSize();
 		if (Size.X < Epsilon || Size.Y < Epsilon || Size.Z < Epsilon)
@@ -1442,6 +1511,7 @@ bool UNavGen3DSubsystem::ProcessNavMesh3DVolume(NavMesh3DVolume& RefVolume, bool
 	if (FarthestAxis == EAxis::None && StartPenetratingCount == 0)
 	{
 		// No collision in any direction: volume is clear, add to solution
+		LastProcessBranch = TEXT("clear volume");
 		AddNavMeshVolume(RefVolume);
 		if (InDrawDebug)
 		{
@@ -1487,6 +1557,7 @@ bool UNavGen3DSubsystem::ProcessNavMesh3DVolume(NavMesh3DVolume& RefVolume, bool
 		bool bHasValidVolume = true;
 		if (FarthestImpactNormal.IsNearlyZero() || NavGen3DClip::IsAxisAlignedNormal(FarthestImpactNormal))
 		{
+			LastProcessBranch = TEXT("clean split");
 			// Impact surface is parallel to a side of the volume: split cleanly so the clear
 			// slab between the starting plane and the impact goes to the solution, and the
 			// rest of the volume is queued for further processing
@@ -1510,6 +1581,7 @@ bool UNavGen3DSubsystem::ProcessNavMesh3DVolume(NavMesh3DVolume& RefVolume, bool
 		}
 		else
 		{
+			LastProcessBranch = TEXT("clipped");
 			// Impact surface is at an angle: split along the impact plane. The surface normal
 			// faces back toward the clear side the trace started from, so the clip vector
 			// points the opposite way, into the geometry.
@@ -1644,6 +1716,7 @@ bool UNavGen3DSubsystem::ProcessNavMesh3DVolume(NavMesh3DVolume& RefVolume, bool
 
 			if (bHasCorner)
 			{
+				LastProcessBranch = TEXT("clipped, corner split");
 				const float CornerValue = CornerPoint[CornerAxis];
 				Remainder = CreateNavMeshVolume();
 				Remainder->Bounds = RefVolume.Bounds;
@@ -1676,6 +1749,7 @@ bool UNavGen3DSubsystem::ProcessNavMesh3DVolume(NavMesh3DVolume& RefVolume, bool
 			auto FallBackToTracedSlab = [&](const FString& InReason)
 			{
 				bFellBackToSlab = true;
+				LastProcessBranch = TEXT("traced-slab fallback");
 
 				// The corner split's remainder is replaced by the one below
 				delete Remainder;
@@ -1820,16 +1894,27 @@ bool UNavGen3DSubsystem::ProcessNavMesh3DVolume(NavMesh3DVolume& RefVolume, bool
 					if (bReverseHit && (!SolutionVolume.IsClipped() || PlaneDist > PlaneTolerance))
 					{
 						const float HalfEpsilon = Epsilon * 0.5f;
-						if (InSide.bFromMin)
+						const float NewMin = InSide.bFromMin ? FMath::Max(Bounds.Min[Axis], ReverseImpact[Axis] + HalfEpsilon) : Bounds.Min[Axis];
+						const float NewMax = InSide.bFromMin ? Bounds.Max[Axis] : FMath::Min(Bounds.Max[Axis], ReverseImpact[Axis] - HalfEpsilon);
+
+						// A hit right by the sweep's start would leave no room (or an inverted box), so the
+						// clipped volume can't be kept; use the traced slab and queue the rest instead
+						if (NewMax - NewMin <= Epsilon)
 						{
-							Bounds.Min[Axis] = FMath::Max(Bounds.Min[Axis], ReverseImpact[Axis] + HalfEpsilon);
+							FallBackToTracedSlab(FString::Printf(TEXT("Reverse sweep toward axis %d hit geometry at %s next to its start, leaving no room"),
+								Axis, *FVectorToString(ReverseImpact)));
+							return;
 						}
-						else
+
+						Bounds.Min[Axis] = NewMin;
+						Bounds.Max[Axis] = NewMax;
+						if (!NavGen3DClip::FitBoundsToClip(SolutionVolume))
 						{
-							Bounds.Max[Axis] = FMath::Min(Bounds.Max[Axis], ReverseImpact[Axis] - HalfEpsilon);
+							FallBackToTracedSlab(FString::Printf(TEXT("Reverse sweep toward axis %d left nothing on the valid side of the clip"), Axis));
+							return;
 						}
-						bHasValidVolume = NavGen3DClip::FitBoundsToClip(SolutionVolume);
 						Outcome = FString::Printf(TEXT("hit geometry at %s, limited the volume there"), *FVectorToString(ReverseImpact));
+						LastProcessBranch = TEXT("clipped, limited by reverse sweep");
 					}
 					else if (bReverseHit)
 					{
@@ -1859,15 +1944,22 @@ bool UNavGen3DSubsystem::ProcessNavMesh3DVolume(NavMesh3DVolume& RefVolume, bool
 
 				for (const FPenetratingSide& Side : PenetratingSides)
 				{
-					if (!bHasValidVolume) break;
+					if (!bHasValidVolume || bFellBackToSlab) break;
 					LimitByReverseSweep(Side);
 				}
 			}
 
 			// Fitting to the clip shrinks the solution bounds to the clear side. Whatever is left of
 			// the clip region outside those bounds is queued for processing as up to six slabs,
-			// peeled one axis at a time so they don't overlap.
-			if (bHasValidVolume && !bFellBackToSlab)
+			// peeled one axis at a time so they don't overlap. A degenerate or inverted solution box
+			// would make one "slab" the whole region, so slabs need a solution with real size.
+			const FVector InnerSize = SolutionVolume.Bounds.GetSize();
+			const bool bInnerHasSize = InnerSize.X > Epsilon && InnerSize.Y > Epsilon && InnerSize.Z > Epsilon;
+			if (bHasValidVolume && !bFellBackToSlab && !bInnerHasSize)
+			{
+				FallBackToTracedSlab(FString::Printf(TEXT("Clipped volume came out with no size (Extent:%s)"), *InnerSize.ToString()));
+			}
+			if (bHasValidVolume && !bFellBackToSlab && bInnerHasSize)
 			{
 				const FBox& Inner = SolutionVolume.Bounds;
 				FBox Outer = ClipRegion;
@@ -2041,6 +2133,7 @@ bool UNavGen3DSubsystem::ProcessNavMesh3DVolume(NavMesh3DVolume& RefVolume, bool
 		if (BestSide)
 		{
 			const int32 Axis = BestSide->AxisIndex;
+			LastProcessBranch = TEXT("clear slice split");
 			FBox LowPart = RefVolume.Bounds;
 			FBox HighPart = RefVolume.Bounds;
 			LowPart.Max[Axis] = BestSliceValue;
@@ -2119,6 +2212,7 @@ bool UNavGen3DSubsystem::ProcessNavMesh3DVolume(NavMesh3DVolume& RefVolume, bool
 
 			if (Parts.Num() > 1)
 			{
+				LastProcessBranch = TEXT("tip split");
 				for (const FBox& Part : Parts)
 				{
 					QueuePart(Part);
@@ -2138,6 +2232,7 @@ bool UNavGen3DSubsystem::ProcessNavMesh3DVolume(NavMesh3DVolume& RefVolume, bool
 			}
 		}
 
+		LastProcessBranch = TEXT("halving (no clear slice or tip)");
 		// No clear slice and no tip to split through, e.g. geometry passing right through the
 		// volume: halve it along its longest axis so later passes can isolate the geometry
 		if (InDrawDebug)
@@ -3134,8 +3229,40 @@ bool UNavGen3DSubsystem::GenerateNavMesh3D(NavMeshVolumeBase* InVolume)
 	const int32 MaxVolumeCount = GetDefault<UNavGen3DSettings>()->MaxVolumeCount;
 	const int32 MaxIterations = FMath::Max(MaxVolumeCount, 1) * NavGen3DClip::MaxProcessIterationsPerVolume;
 	LastGenerationIterations = 0;
+
+	// Progress is measured as space resolved: the total is the volume of everything queued at the
+	// start, and each processed volume counts its own volume minus whatever it queued, so splitting
+	// never moves the bar backwards. It reaches the end when the queue is empty.
+	auto GetBoxVolume = [](const FBox& InBox) -> double
+	{
+		const FVector Size = InBox.GetSize();
+		return Size.X * Size.Y * Size.Z;
+	};
+	double TotalWork = 0.0;
+	for (const NavMeshVolumeBase* Volume : ProcessVolumesList)
+	{
+		TotalWork += GetBoxVolume(Volume->Bounds);
+	}
+	// Work is passed to the slow task as a fraction of the total, so huge volumes don't lose float precision
+	const double WorkScale = TotalWork > 0.0 ? 1.0 / TotalWork : 0.0;
+
+	FScopedSlowTask SlowTask(1.0f, FText::FromString(TEXT("Generating NavMesh3D...")));
+	SlowTask.MakeDialogDelayed(NavGen3DClip::ProgressDialogDelay, /*bShowCancelButton=*/true);
+	double ResolvedWorkForFrame = 0.0;
+
 	while (!ProcessVolumesList.IsEmpty())
 	{
+		SlowTask.EnterProgressFrame((float)(ResolvedWorkForFrame * WorkScale),
+			FText::FromString(FString::Printf(TEXT("Generating NavMesh3D: %d processed, %d queued, %d solution volumes (%.1f%% full)"),
+				LastGenerationIterations, ProcessVolumesList.Num(), NavMeshSolutionMap.Num(),
+				MaxVolumeCount > 0 ? 100.0f * NavMeshSolutionMap.Num() / MaxVolumeCount : 0.0f)));
+		if (SlowTask.ShouldCancel())
+		{
+			AddLogMessage(ENavGen3DLogCategory::Warning, TEXT(""),
+				FString::Printf(TEXT("Generation cancelled after %d iterations with %d volumes still queued"), LastGenerationIterations, ProcessVolumesList.Num()));
+			return false;
+		}
+
 		// Once the solution is full every further volume is rejected, so processing can't add anything
 		if (NavMeshSolutionMap.Num() >= MaxVolumeCount)
 		{
@@ -3154,7 +3281,17 @@ bool UNavGen3DSubsystem::GenerateNavMesh3D(NavMeshVolumeBase* InVolume)
 
 		NavMeshVolumeBase* CurrentVolume = ProcessVolumesList[0];
 		ProcessVolumesList.RemoveAtSwap(0);
+
+		// Volumes queued while processing are appended to the end of the list
+		const int32 QueuedBefore = ProcessVolumesList.Num();
 		ProcessNavMeshVolume(*CurrentVolume);
+		double QueuedWork = 0.0;
+		for (int32 i = QueuedBefore; i < ProcessVolumesList.Num(); ++i)
+		{
+			QueuedWork += GetBoxVolume(ProcessVolumesList[i]->Bounds);
+		}
+		ResolvedWorkForFrame = FMath::Max(0.0, GetBoxVolume(CurrentVolume->Bounds) - QueuedWork);
+
 		delete CurrentVolume;
 	}
 
@@ -3183,6 +3320,12 @@ void UNavGen3DSubsystem::InitializeNavMesh3D()
 bool UNavGen3DSubsystem::GenerateNavMesh3DFromBoundsVolume(ANavGen3DBoundsVolume* InVolume)
 {
 	InitializeNavMesh3D();
+
+	// Clear debug drawing left from previous runs, so only this generation's drawing is shown
+	if (UWorld* World = FindWorld())
+	{
+		FlushPersistentDebugLines(World);
+	}
 
 	const FString ActorName = InVolume ? InVolume->GetActorLabel() : TEXT("<unknown>");
 	AddLogMessage(ENavGen3DLogCategory::Info, ActorName, TEXT("generating NavMesh3D..."));
@@ -3569,11 +3712,11 @@ void UNavGen3DSubsystem::DebugDrawUpdate()
 					}
 					if (NavGen3DClip::IsClippedVolume(Volume))
 					{
-						NavGen3DClip::DrawClippedVolume(World, *Volume.AsNavMesh3DVolume(), DrawTime, 3.0f);
+						NavGen3DClip::DrawClippedVolume(World, *Volume.AsNavMesh3DVolume(), DrawTime, NavGen3DClip::SolutionVolumeThickness);
 					}
 					else
 					{
-						DrawDebugBox(World, Center, Volume.Bounds.GetExtent(), BoxColor, false, DrawTime, 0, 3.0f);
+						DrawDebugBox(World, Center, Volume.Bounds.GetExtent(), BoxColor, false, DrawTime, 0, NavGen3DClip::SolutionVolumeThickness);
 					}
 
 					if (AgentConnections)
@@ -3634,11 +3777,11 @@ void UNavGen3DSubsystem::DebugDrawUpdate()
 		{
 			if (NavGen3DClip::IsClippedVolume(*Volume))
 			{
-				NavGen3DClip::DrawClippedVolume(World, *Volume->AsNavMesh3DVolume(), DrawTime, 5.0f);
+				NavGen3DClip::DrawClippedVolume(World, *Volume->AsNavMesh3DVolume(), DrawTime, NavGen3DClip::CameraVolumeThickness, FColor::Purple, SDPG_Foreground);
 			}
 			else
 			{
-				DrawDebugBox(World, Volume->Bounds.GetCenter(), Volume->Bounds.GetExtent(), FColor::Green, false, DrawTime, 0, 5.0f);
+				DrawDebugBox(World, Volume->Bounds.GetCenter(), Volume->Bounds.GetExtent(), FColor::Purple, false, DrawTime, SDPG_Foreground, NavGen3DClip::CameraVolumeThickness);
 			}
 
 			if (const TMap<uint64, TArray<FNavVolumeConnection>>* AgentConnections = NavVolumeConnectionMap.Find(DebugNavMeshAgentIndex))
@@ -3656,7 +3799,7 @@ void UNavGen3DSubsystem::DebugDrawUpdate()
 		{
 			if (NavMeshVolumeBase* GenVolume = FindGenerationVolumeContainingLocation(CameraLocation, false))
 			{
-				DrawDebugBox(World, GenVolume->Bounds.GetCenter(), GenVolume->Bounds.GetExtent(), FColor::Orange, false, DrawTime, 0, 5.0f);
+				DrawDebugBox(World, GenVolume->Bounds.GetCenter(), GenVolume->Bounds.GetExtent(), FColor::Orange, false, DrawTime, SDPG_Foreground, NavGen3DClip::CameraVolumeThickness);
 				delete GenVolume;
 			}
 		}

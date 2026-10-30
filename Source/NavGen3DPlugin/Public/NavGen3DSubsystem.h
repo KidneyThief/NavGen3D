@@ -202,6 +202,8 @@ public:
 	// Volumes processed by the last full GenerateNavMesh3D run
 	int32 LastGenerationIterations = 0;
 
+	// Which branch the last ProcessNavMesh3DVolume pass took, for diagnosing passes that make no progress
+	const TCHAR* LastProcessBranch = TEXT("none");
 	TArray<TWeakObjectPtr<ANavGen3DBoundsVolume>> BoundsVolumes;
 
 public:
